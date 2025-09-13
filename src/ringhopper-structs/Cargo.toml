@@ -1,0 +1,14 @@
+[package]
+name = "ringhopper-structs"
+version = "0.2.0"
+license = "GPL-3.0-only"
+edition = "2024"
+
+[dependencies]
+funnel-web = { git = "https://github.com/FishAndRips/funnel-web.git", rev = "29d6e38198e72303d623c2a627b044626076b628" }
+ringhopper-structs-codegen = { path = "../ringhopper-structs-codegen" }
+byteorder = "1.5.0"
+
+[features]
+default = []
+std = []

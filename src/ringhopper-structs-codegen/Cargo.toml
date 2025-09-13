@@ -1,0 +1,11 @@
+[package]
+name = "ringhopper-structs-codegen"
+version = "0.2.0"
+license = "GPL-3.0-only"
+edition = "2024"
+
+[lib]
+proc-macro = true
+
+[dependencies]
+ringhopper-definitions = { git = "https://github.com/FishAndRips/ringhopper-definitions.git", rev = "4f451a7482b805de9b043096df107b13ff7ad747" }
