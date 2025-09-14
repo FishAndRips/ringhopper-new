@@ -1,5 +1,8 @@
 use core::fmt::{Debug, Display, Formatter};
 
+/// Describes a 32-bit RAM address.
+///
+/// Not generally relevant in tag data.
 #[derive(Copy, Clone, PartialEq, Default)]
 #[repr(transparent)]
 pub struct Address(pub u32);

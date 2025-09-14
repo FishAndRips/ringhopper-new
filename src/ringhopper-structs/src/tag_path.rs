@@ -1,6 +1,6 @@
 use alloc::string::String;
 use core::fmt::{Debug, Display, Formatter};
-use crate::TagGroup;
+use crate::definitions::TagGroup;
 use core::cmp::Ordering;
 use crate::util::*;
 

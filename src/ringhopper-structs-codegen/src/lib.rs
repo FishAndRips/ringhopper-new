@@ -1,4 +1,6 @@
 use proc_macro::TokenStream;
+use ringhopper_definitions::{Bitfield, Enum, FieldObject, NamedObject, Struct, StructFieldType};
+use std::fmt::write;
 
 #[proc_macro]
 pub fn generate_tag_group_enum(_: TokenStream) -> TokenStream {
@@ -15,7 +17,7 @@ pub fn generate_tag_group_enum(_: TokenStream) -> TokenStream {
     // the enum
     q += "pub enum TagGroup {\n";
     for group in definitions.groups.values() {
-        std::fmt::write(&mut q, format_args!("{} = 0x{:08X},\n", group.struct_name, group.fourcc_binary)).unwrap();
+        write(&mut q, format_args!("{} = 0x{:08X},\n", group.struct_name, group.fourcc_binary)).unwrap();
     }
     q += "}\n";
 
@@ -29,7 +31,7 @@ pub fn generate_tag_group_enum(_: TokenStream) -> TokenStream {
     q += "pub const fn as_str(self) -> &'static str {\n";
     q += "match self {\n";
     for group in definitions.groups.values() {
-        std::fmt::write(&mut q, format_args!("Self::{struct_name}=>\"{name}\",\n", struct_name = group.struct_name, name = group.name)).unwrap();
+        write(&mut q, format_args!("Self::{struct_name}=>\"{name}\",\n", struct_name = group.struct_name, name = group.name)).unwrap();
     }
     q += "}\n";
     q += "}\n";
@@ -40,7 +42,7 @@ pub fn generate_tag_group_enum(_: TokenStream) -> TokenStream {
     q += "pub fn from_str(s: &str) -> Option<TagGroup> {\n";
     q += "match s {\n";
     for group in definitions.groups.values() {
-        std::fmt::write(&mut q, format_args!("\"{name}\"=>Some(Self::{struct_name}),\n", struct_name = group.struct_name, name = group.name)).unwrap();
+        write(&mut q, format_args!("\"{name}\"=>Some(Self::{struct_name}),\n", struct_name = group.struct_name, name = group.name)).unwrap();
     }
     q += "_ => None\n";
     q += "}\n";
@@ -59,7 +61,7 @@ pub fn generate_tag_group_enum(_: TokenStream) -> TokenStream {
     q += "pub const fn from_u32(u: u32) -> Option<TagGroup> {\n";
     q += "match u {\n";
     for group in definitions.groups.values() {
-        std::fmt::write(&mut q, format_args!("0x{fourcc:08X}=>Some(Self::{struct_name}),\n", struct_name = group.struct_name, fourcc = group.fourcc_binary)).unwrap();
+        write(&mut q, format_args!("0x{fourcc:08X}=>Some(Self::{struct_name}),\n", struct_name = group.struct_name, fourcc = group.fourcc_binary)).unwrap();
     }
     q += "_ => None\n";
     q += "}\n";
@@ -77,8 +79,155 @@ pub fn generate_tag_group_enum(_: TokenStream) -> TokenStream {
     q.parse().expect("failed to parse generate_tag_group_enum result")
 }
 
+#[proc_macro]
+pub fn generate_tag_enums(_: TokenStream) -> TokenStream {
+    let definitions = ringhopper_definitions::load_all_definitions();
+
+    let mut q = String::with_capacity(1024 * 1024 * 32);
+
+    for i in definitions.objects.values() {
+        match i {
+            NamedObject::Enum(e) => generate_enum(&mut q, e),
+            _ => continue,
+        }
+    }
+
+    q.parse().expect("failed to parse generate_tag_structs result")
+}
+
+#[proc_macro]
+pub fn generate_tag_bitfields(_: TokenStream) -> TokenStream {
+    let definitions = ringhopper_definitions::load_all_definitions();
+
+    let mut q = String::with_capacity(1024 * 1024 * 32);
+
+    for i in definitions.objects.values() {
+        match i {
+            NamedObject::Bitfield(b) => generate_bitfield(&mut q, b),
+            _ => continue,
+        }
+    }
+
+    q.parse().expect("failed to parse generate_tag_structs result")
+}
+
 
 #[proc_macro]
 pub fn generate_tag_structs(_: TokenStream) -> TokenStream {
-    todo!()
+    let definitions = ringhopper_definitions::load_all_definitions();
+
+    let mut q = String::with_capacity(1024 * 1024 * 32);
+
+    for i in definitions.objects.values() {
+        match i {
+            NamedObject::Struct(s) => generate_struct(&mut q, s),
+            _ => continue
+        }
+    }
+
+    q.parse().expect("failed to parse generate_tag_structs result")
+}
+
+fn generate_enum(q: &mut String, e: &Enum) {
+    let name = &e.name;
+
+    *q += "#[derive(Copy, Clone, PartialEq, Debug)]\n";
+    *q += "#[repr(u16)]\n";
+    write(q, format_args!("pub enum {name} {{\n")).unwrap();
+    for field in &e.options {
+        if field.flags.exclude {
+            continue
+        }
+        let name = &field.name_rust_enum;
+        let value = field.value;
+        write(q, format_args!("{name} = {value},\n")).unwrap();
+    }
+    *q += "}\n";
+}
+
+fn generate_bitfield(q: &mut String, b: &Bitfield) {
+    let name = &b.name;
+
+    write(q, format_args!("#[derive(Copy, Clone, Debug, PartialEq)]\n")).unwrap();
+    write(q, format_args!("pub struct {name} {{\n")).unwrap();
+    for i in 0..b.width {
+        match b.fields.iter().find(|p| p.value == i as u32) {
+            Some(field) if !field.flags.exclude => {
+                write(q, format_args!("pub {}: bool,", field.name_rust_field)).unwrap()
+            },
+            _ => (),
+        }
+    }
+    *q += "}\n";
+}
+
+fn generate_struct(q: &mut String, s: &Struct) {
+    let name = &s.name;
+
+    *q += "#[derive(Clone, PartialEq, Debug)]\n";
+    if s.is_const {
+        *q += "#[derive(Copy)]\n";
+    }
+    write(q, format_args!("pub struct {name} {{\n")).unwrap();
+    for field in &s.fields {
+        if field.flags.exclude {
+            continue
+        }
+
+        match &field.field_type {
+            StructFieldType::Object(object) => {
+                let buffer;
+
+                let value_name = match object {
+                    FieldObject::NamedObject(n) => n.as_str(),
+                    FieldObject::Reflexive(r) => {
+                        buffer = format!("Vec<{r}>");
+                        buffer.as_str()
+                    },
+                    FieldObject::TagReference { .. } => "TagReference",
+                    FieldObject::TagGroup => "TagGroup",
+                    FieldObject::Data => "Vec<u8>",
+                    FieldObject::BSPVertexData => "Vec<u8>",
+                    FieldObject::UTF16String => "String",
+                    FieldObject::FileData => "Vec<u8>",
+                    FieldObject::F32 => "f32",
+                    FieldObject::U8 => "u8",
+                    FieldObject::U16 => "u16",
+                    FieldObject::U32 => "u32",
+                    FieldObject::I8 => "i8",
+                    FieldObject::I16 => "i16",
+                    FieldObject::I32 => "i32",
+                    FieldObject::TagID => "TagID",
+                    FieldObject::ID => "u32",
+                    FieldObject::Index => "Index",
+                    FieldObject::Angle => "Angle",
+                    FieldObject::Address => "Address",
+                    FieldObject::Vector2D => "Vector2D",
+                    FieldObject::Vector3D => "Vector3D",
+                    FieldObject::CompressedVector2D => "CompressedVector2D",
+                    FieldObject::CompressedVector3D => "CompressedVector3D",
+                    FieldObject::CompressedFloat => "CompressedFloat",
+                    FieldObject::Vector2DInt => "Vector2DInt",
+                    FieldObject::Plane2D => "Plane2D",
+                    FieldObject::Plane3D => "Plane3D",
+                    FieldObject::Euler2D => "Euler2D",
+                    FieldObject::Euler3D => "Euler3D",
+                    FieldObject::Rectangle => "Rectangle",
+                    FieldObject::Quaternion => "Quaternion",
+                    FieldObject::Matrix2x3 => "Matrix2x3",
+                    FieldObject::Matrix3x3 => "Matrix3x3",
+                    FieldObject::ColorRGB => "ColorRGB",
+                    FieldObject::ColorARGB => "ColorARGB",
+                    FieldObject::Pixel32 => "Pixel32",
+                    FieldObject::String32 => "String32",
+                    FieldObject::ScenarioScriptNodeValue => "ScenarioScriptNodeValue",
+                };
+
+                let field_name = &field.name_rust_field;
+                write(q, format_args!("pub {field_name}: {value_name},")).unwrap();
+            },
+            _ => continue
+        }
+    }
+    *q += "}\n";
 }

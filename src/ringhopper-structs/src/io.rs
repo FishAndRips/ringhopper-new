@@ -4,7 +4,7 @@ use funnel_web::id::{Index, ID};
 use funnel_web::rectangle::Rectangle;
 use funnel_web::string::ASCIIString;
 use funnel_web::vector::*;
-use crate::TagGroup;
+use crate::definitions::TagGroup;
 
 /// WriteableData for simple primitives.
 pub trait SimpleWriteableData: Sized {

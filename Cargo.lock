@@ -3,6 +3,12 @@
 version = 4
 
 [[package]]
+name = "autocfg"
+version = "1.5.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "c08606f8c3cbf4ce6ec8e28fb0014a2c086708fe954eaa885384a6165172e7e8"
+
+[[package]]
 name = "byteorder"
 version = "1.5.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -11,7 +17,7 @@ checksum = "1fd0f2584146f6f2ef48085050886acf353beff7305ebd1ae69500e27c67f64b"
 [[package]]
 name = "funnel-web"
 version = "0.1.0"
-source = "git+https://github.com/FishAndRips/funnel-web.git?rev=29d6e38198e72303d623c2a627b044626076b628#29d6e38198e72303d623c2a627b044626076b628"
+source = "git+https://github.com/FishAndRips/funnel-web.git?rev=4cae0316fb98a58fa93f67984b609fbd919fb8fb#4cae0316fb98a58fa93f67984b609fbd919fb8fb"
 dependencies = [
  "libm",
 ]
@@ -31,6 +37,16 @@ name = "libm"
 version = "0.2.15"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f9fbbcab51052fe104eb5e5d351cf728d30a5be1fe14d9be8a3b097481fb97de"
+
+[[package]]
+name = "lock_api"
+version = "0.4.13"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "96936507f153605bddfcda068dd804796c84324ed2510809e5b2a624c81da765"
+dependencies = [
+ "autocfg",
+ "scopeguard",
+]
 
 [[package]]
 name = "memchr"
@@ -63,9 +79,10 @@ version = "0.2.0"
 [[package]]
 name = "ringhopper-definitions"
 version = "0.2.0"
-source = "git+https://github.com/FishAndRips/ringhopper-definitions.git?rev=4f451a7482b805de9b043096df107b13ff7ad747#4f451a7482b805de9b043096df107b13ff7ad747"
+source = "git+https://github.com/FishAndRips/ringhopper-definitions.git?rev=0a87cf09cf9c4616571b124821b804da80b1f837#0a87cf09cf9c4616571b124821b804da80b1f837"
 dependencies = [
  "serde_json",
+ "spin",
 ]
 
 [[package]]
@@ -89,6 +106,12 @@ name = "ryu"
 version = "1.0.20"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "28d3b2b1366ec20994f1fd18c3c594f05c5dd4bc44d8bb0c1c632c8d6829481f"
+
+[[package]]
+name = "scopeguard"
+version = "1.2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "94143f37725109f92c262ed2cf5e59bce7498c01bcc1502d7b9afe439a4e9f49"
 
 [[package]]
 name = "serde"
@@ -120,6 +143,15 @@ dependencies = [
  "memchr",
  "ryu",
  "serde",
+]
+
+[[package]]
+name = "spin"
+version = "0.10.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d5fe4ccb98d9c292d56fec89a5e07da7fc4cf0dc11e156b41793132775d3e591"
+dependencies = [
+ "lock_api",
 ]
 
 [[package]]
