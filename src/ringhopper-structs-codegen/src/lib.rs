@@ -1,21 +1,22 @@
 use proc_macro::TokenStream;
-use ringhopper_definitions::{Bitfield, Enum, FieldObject, NamedObject, Struct, StructFieldType};
+use ringhopper_definitions::{Bitfield, Enum, FieldObject, NamedObject, ParsedDefinitions, SizeableObject, Struct, StructFieldType};
 use std::fmt::write;
 
 #[proc_macro]
 pub fn generate_tag_group_enum(_: TokenStream) -> TokenStream {
     let definitions = ringhopper_definitions::load_all_definitions();
 
-    let mut q = String::with_capacity(1024 * 1024 * 1);
+    let mut q = String::with_capacity(1024 * 1024 * 2);
 
     q += "/// Defines a type of tag.\n";
     q += "///\n";
     q += "/// Internally, this is represented as a 32-bit `u32` (a FourCC).\n";
-    q += "#[derive(Copy, Clone, PartialEq, Debug)]\n";
+    q += "#[derive(Copy, Clone, PartialEq, Debug, Default)]\n";
     q += "#[repr(u32)]\n";
 
     // the enum
     q += "pub enum TagGroup {\n";
+    q += "#[default] None = 0xFFFFFFFF,\n";
     for group in definitions.groups.values() {
         write(&mut q, format_args!("{} = 0x{:08X},\n", group.struct_name, group.fourcc_binary)).unwrap();
     }
@@ -30,6 +31,7 @@ pub fn generate_tag_group_enum(_: TokenStream) -> TokenStream {
     q += "/// This is what is used for file extensions, and it is displayable to the user.\n";
     q += "pub const fn as_str(self) -> &'static str {\n";
     q += "match self {\n";
+    q += "Self::None => \"none\",\n";
     for group in definitions.groups.values() {
         write(&mut q, format_args!("Self::{struct_name}=>\"{name}\",\n", struct_name = group.struct_name, name = group.name)).unwrap();
     }
@@ -41,6 +43,7 @@ pub fn generate_tag_group_enum(_: TokenStream) -> TokenStream {
     q += "/// Instantiate a TagGroup from a `str`.\n";
     q += "pub fn from_str(s: &str) -> Option<TagGroup> {\n";
     q += "match s {\n";
+    q += "\"none\"=>Some(Self::None),\n";
     for group in definitions.groups.values() {
         write(&mut q, format_args!("\"{name}\"=>Some(Self::{struct_name}),\n", struct_name = group.struct_name, name = group.name)).unwrap();
     }
@@ -83,7 +86,7 @@ pub fn generate_tag_group_enum(_: TokenStream) -> TokenStream {
 pub fn generate_tag_enums(_: TokenStream) -> TokenStream {
     let definitions = ringhopper_definitions::load_all_definitions();
 
-    let mut q = String::with_capacity(1024 * 1024 * 32);
+    let mut q = String::with_capacity(1024 * 1024 * 2);
 
     for i in definitions.objects.values() {
         match i {
@@ -99,7 +102,7 @@ pub fn generate_tag_enums(_: TokenStream) -> TokenStream {
 pub fn generate_tag_bitfields(_: TokenStream) -> TokenStream {
     let definitions = ringhopper_definitions::load_all_definitions();
 
-    let mut q = String::with_capacity(1024 * 1024 * 32);
+    let mut q = String::with_capacity(1024 * 1024 * 2);
 
     for i in definitions.objects.values() {
         match i {
@@ -116,11 +119,11 @@ pub fn generate_tag_bitfields(_: TokenStream) -> TokenStream {
 pub fn generate_tag_structs(_: TokenStream) -> TokenStream {
     let definitions = ringhopper_definitions::load_all_definitions();
 
-    let mut q = String::with_capacity(1024 * 1024 * 32);
+    let mut q = String::with_capacity(1024 * 1024 * 8);
 
     for i in definitions.objects.values() {
         match i {
-            NamedObject::Struct(s) => generate_struct(&mut q, s),
+            NamedObject::Struct(s) => generate_struct(&mut q, s, &definitions),
             _ => continue
         }
     }
@@ -131,27 +134,63 @@ pub fn generate_tag_structs(_: TokenStream) -> TokenStream {
 fn generate_enum(q: &mut String, e: &Enum) {
     let name = &e.name;
 
-    *q += "#[derive(Copy, Clone, PartialEq, Debug)]\n";
+    *q += "#[derive(Copy, Clone, PartialEq, Debug, Default)]\n";
     *q += "#[repr(u16)]\n";
     write(q, format_args!("pub enum {name} {{\n")).unwrap();
+    let mut default_defined = false;
     for field in &e.options {
         if field.flags.exclude {
             continue
         }
         let name = &field.name_rust_enum;
         let value = field.value;
+        if !default_defined {
+            default_defined = true;
+            *q += "#[default]\n";
+        }
         write(q, format_args!("{name} = {value},\n")).unwrap();
     }
+    *q += "}\n";
+
+    write(q, format_args!("impl SimpleWriteableData for {name} {{\n")).unwrap();
+    *q += "fn length() -> usize { 2 }\n";
+
+    *q += "fn read_tag_data_simple<B: ByteOrder>(from: &[u8], parameters: Parameters) -> Result<Self, &'static str> {\n";
+    *q += "match u16::read_tag_data_simple::<B>(from, parameters)? {\n";
+    for field in &e.options {
+        if field.flags.exclude {
+            continue
+        }
+
+        let field_name = &field.name_rust_enum;
+        write(q, format_args!("0x{:04X} ", field.value)).unwrap();
+        if field.flags.cache_only {
+            *q += "if parameters.cache_only_fields ";
+        }
+        else if field.flags.non_cached {
+            *q += "if parameters.tag_only_fields ";
+        }
+        *q += "=> ";
+        write(q, format_args!("Ok(Self::{field_name}),\n")).unwrap();
+    }
+    write(q, format_args!("_ => Err(\"invalid enum value for {name}\"),\n")).unwrap();
+    *q += "}\n";
+    *q += "}\n";
+
+    *q += "fn write_tag_data_simple<B: ByteOrder>(&self, to: &mut [u8], parameters: Parameters) {\n";
+    *q += "(*self as u16).write_tag_data_simple::<B>(to, parameters);\n";
+    *q += "}\n";
     *q += "}\n";
 }
 
 fn generate_bitfield(q: &mut String, b: &Bitfield) {
     let name = &b.name;
 
-    write(q, format_args!("#[derive(Copy, Clone, Debug, PartialEq)]\n")).unwrap();
+    write(q, format_args!("#[derive(Copy, Clone, Debug, PartialEq, Default)]\n")).unwrap();
     write(q, format_args!("pub struct {name} {{\n")).unwrap();
     for i in 0..b.width {
-        match b.fields.iter().find(|p| p.value == i as u32) {
+        let f = 1u32 << i;
+        match b.fields.iter().find(|p| p.value == f) {
             Some(field) if !field.flags.exclude => {
                 write(q, format_args!("pub {}: bool,", field.name_rust_field)).unwrap()
             },
@@ -159,12 +198,60 @@ fn generate_bitfield(q: &mut String, b: &Bitfield) {
         }
     }
     *q += "}\n";
+
+    let width = b.width;
+
+    write(q, format_args!("impl SimpleWriteableData for {name} {{\n")).unwrap();
+    write(q, format_args!("fn length() -> usize {{ {width} / 8 }}\n")).unwrap();
+
+    *q += "fn read_tag_data_simple<B: ByteOrder>(from: &[u8], parameters: Parameters) -> Result<Self, &'static str> {\n";
+    write(q, format_args!("let raw_data = u{width}::read_tag_data_simple::<B>(from, parameters)?;\n")).unwrap();
+    *q += "Ok(Self {\n";
+
+    for field in &b.fields {
+        if field.flags.exclude {
+            continue
+        }
+        write(q, format_args!("{}: \n", field.name_rust_field)).unwrap();
+        if field.flags.cache_only {
+            *q += "parameters.cache_only_fields && "
+        }
+        else if field.flags.non_cached {
+            *q += "parameters.tag_only_fields && "
+        }
+        write(q, format_args!("(raw_data & {}) != 0", field.value)).unwrap();
+        *q += ",\n";
+    }
+
+    *q += "})\n";
+    *q += "}\n";
+
+    *q += "fn write_tag_data_simple<B: ByteOrder>(&self, to: &mut [u8], parameters: Parameters) {\n";
+    write(q, format_args!("let mut raw_data = 0u{width};\n")).unwrap();
+
+    for field in &b.fields {
+        if field.flags.exclude {
+            continue
+        }
+        *q += "if ";
+        if field.flags.cache_only {
+            *q += "parameters.cache_only_fields && "
+        }
+        else if field.flags.non_cached {
+            *q += "parameters.tag_only_fields && "
+        }
+        write(q, format_args!("self.{} {{ raw_data |= {} }}\n", field.name_rust_field, field.value)).unwrap();
+    }
+
+    *q += "raw_data.write_tag_data_simple::<B>(to, parameters)\n";
+    *q += "}\n";
+    *q += "}\n";
 }
 
-fn generate_struct(q: &mut String, s: &Struct) {
+fn generate_struct(q: &mut String, s: &Struct, definitions: &ParsedDefinitions) {
     let name = &s.name;
 
-    *q += "#[derive(Clone, PartialEq, Debug)]\n";
+    *q += "#[derive(Clone, PartialEq, Debug, Default)]\n";
     if s.is_const {
         *q += "#[derive(Copy)]\n";
     }
@@ -230,4 +317,83 @@ fn generate_struct(q: &mut String, s: &Struct) {
         }
     }
     *q += "}\n";
+
+    if s.is_const {
+        write(q, format_args!("impl SimpleWriteableData for {} {{\n", s.name)).unwrap();
+        write(q, format_args!("fn length() -> usize {{ {} }}", s.size)).unwrap();
+
+        *q += "fn read_tag_data_simple<B: ByteOrder>(from: &[u8], parameters: Parameters) -> Result<Self, &'static str> {\n";
+        *q += "Ok(Self {\n";
+        for field in &s.fields {
+            if field.flags.exclude {
+                continue
+            }
+            if !matches!(field.field_type, StructFieldType::Object(_)) {
+                continue
+            }
+
+            let field_name = &field.name_rust_field;
+            let size = field.size(definitions);
+            let offset = field.relative_offset;
+            let offset_end = field.relative_offset.checked_add(size).expect("relative_offset overflow when making const struct");
+            write(q, format_args!("{field_name}: ")).unwrap();
+
+            let mut memed = false;
+            if field.flags.cache_only {
+                *q += "if parameters.cache_only_fields { ";
+                memed = true;
+            }
+            else if field.flags.non_cached {
+                *q += "if parameters.tag_only_fields { ";
+                memed = true;
+            }
+
+            write(q, format_args!("SimpleWriteableData::read_tag_data_simple::<B>(&from[{offset}..{offset_end}], parameters)?")).unwrap();
+
+            if memed {
+                *q += " } else { Default::default() }";
+            }
+            *q += ",\n";
+        }
+        *q += "})\n";
+        *q += "}\n";
+
+        *q += "fn write_tag_data_simple<B: ByteOrder>(&self, to: &mut [u8], parameters: Parameters) {\n";
+        for field in &s.fields {
+            if field.flags.exclude {
+                continue
+            }
+            if !matches!(field.field_type, StructFieldType::Object(_)) {
+                continue
+            }
+
+            let field_name = &field.name_rust_field;
+            let size = field.size(definitions);
+            let offset = field.relative_offset;
+            let offset_end = field.relative_offset.checked_add(size).expect("relative_offset overflow when making const struct");
+
+            let mut memed = false;
+            if field.flags.cache_only {
+                *q += "if parameters.cache_only_fields { ";
+                memed = true;
+            }
+            else if field.flags.non_cached {
+                *q += "if parameters.tag_only_fields { ";
+                memed = true;
+            }
+
+            write(q, format_args!("self.{field_name}.write_tag_data_simple::<B>(&mut to[{offset}..{offset_end}], parameters);")).unwrap();
+
+            if memed {
+                *q += " }";
+            }
+            *q += "\n";
+        }
+        *q += "}\n";
+
+        *q += "}\n";
+    }
+    else {
+        // TODO
+    }
 }

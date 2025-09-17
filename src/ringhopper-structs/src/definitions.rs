@@ -4,11 +4,15 @@ ringhopper_structs_codegen::generate_tag_group_enum!();
 
 /// Contains all enums from the definitions.
 pub mod enums {
+    use crate::*;
+    use byteorder::ByteOrder;
     ringhopper_structs_codegen::generate_tag_enums!();
 }
 
 /// Contains all bitfields from the definitions.
 pub mod bitfields {
+    use crate::*;
+    use byteorder::ByteOrder;
     ringhopper_structs_codegen::generate_tag_bitfields!();
 }
 
@@ -25,5 +29,6 @@ pub mod structs {
     use super::enums::*;
     use super::TagGroup;
     use alloc::string::String;
+    use byteorder::ByteOrder;
     ringhopper_structs_codegen::generate_tag_structs!();
 }

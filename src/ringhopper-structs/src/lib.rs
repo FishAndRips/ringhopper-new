@@ -12,25 +12,15 @@ mod util;
 mod io;
 mod address;
 
-#[derive(Copy, Clone)]
-pub union ScenarioScriptNodeValue {
-    pub real: f32,
-    pub short: i16,
-    pub long: i32,
-    pub id: u32
+#[derive(Copy, Clone, PartialEq, Default)]
+#[repr(transparent)]
+pub struct ScenarioScriptNodeValue {
+    pub data: u32
 }
 
 impl Debug for ScenarioScriptNodeValue {
     fn fmt(&self, f: &mut Formatter<'_>) -> core::fmt::Result {
-        // SAFETY: This is just viewing it as an int which shouldn't be dangerous
-        f.write_fmt(format_args!("0x{}??", unsafe { self.id }))
-    }
-}
-
-impl PartialEq for ScenarioScriptNodeValue {
-    fn eq(&self, other: &Self) -> bool {
-        // SAFETY: This is just viewing it as an int which shouldn't be dangerous
-        unsafe { self.id == other.id }
+        f.write_fmt(format_args!("0x{}??", self.data))
     }
 }
 

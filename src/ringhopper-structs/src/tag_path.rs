@@ -111,7 +111,7 @@ impl TagPath {
     ///
     /// ```
     /// use ringhopper_structs::TagPath;
-    /// use ringhopper_structs::TagGroup;
+    /// use ringhopper_structs::definitions::TagGroup;
     ///
     /// let path = TagPath::from_path_with_extension("weapons\\myweapon\\myweapon.isthebest.weapon")
     ///                 .expect("tag path should be valid");
@@ -143,7 +143,7 @@ impl TagPath {
     ///
     /// ```
     /// use ringhopper_structs::TagPath;
-    /// use ringhopper_structs::TagGroup;
+    /// use ringhopper_structs::definitions::TagGroup;
     ///
     /// let path = TagPath::from_path_without_extension("weapons\\myweapon\\myweapon.isthebest", TagGroup::Weapon)
     ///                 .expect("tag path should be valid");
@@ -256,7 +256,7 @@ impl TagPath {
     ///
     /// ```
     /// use ringhopper_structs::TagPath;
-    /// use ringhopper_structs::TagGroup;
+    /// use ringhopper_structs::definitions::TagGroup;
     ///
     /// let mut path = TagPath::from_path_without_extension("weapons\\myweapon\\myweapon.isthebest", TagGroup::Weapon)
     ///                 .expect("tag path should be valid");
@@ -297,6 +297,12 @@ impl Display for TagPath {
 pub enum TagReference {
     Unset(TagGroup),
     Set(TagPath)
+}
+
+impl Default for TagReference {
+    fn default() -> Self {
+        Self::Unset(TagGroup::None)
+    }
 }
 
 impl Display for TagReference {
