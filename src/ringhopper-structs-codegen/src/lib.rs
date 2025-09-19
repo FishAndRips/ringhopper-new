@@ -1,5 +1,5 @@
 use proc_macro::TokenStream;
-use ringhopper_definitions::{Bitfield, Enum, FieldObject, NamedObject, ParsedDefinitions, SizeableObject, Struct, StructFieldType};
+use ringhopper_definitions::{Bitfield, Enum, FieldCount, FieldObject, NamedObject, ParsedDefinitions, SizeableObject, Struct, StructFieldType};
 use std::fmt::write;
 
 #[proc_macro]
@@ -310,8 +310,14 @@ fn generate_struct(q: &mut String, s: &Struct, definitions: &ParsedDefinitions) 
                     FieldObject::ScenarioScriptNodeValue => "ScenarioScriptNodeValue",
                 };
 
-                let field_name = &field.name_rust_field;
-                write(q, format_args!("pub {field_name}: {value_name},")).unwrap();
+                write(q, format_args!("pub {}: ", field.name_rust_field)).unwrap();
+                match field.count {
+                    FieldCount::Bounds => write(q, format_args!("Bounds<{value_name}>")).unwrap(),
+                    FieldCount::One => *q += &value_name,
+                    FieldCount::Array(l) => write(q, format_args!("[{value_name};{l}]")).unwrap()
+                }
+
+                *q += ",";
             },
             _ => continue
         }
@@ -322,8 +328,9 @@ fn generate_struct(q: &mut String, s: &Struct, definitions: &ParsedDefinitions) 
         write(q, format_args!("impl SimpleWriteableData for {} {{\n", s.name)).unwrap();
         write(q, format_args!("fn length() -> usize {{ {} }}", s.size)).unwrap();
 
-        *q += "fn read_tag_data_simple<B: ByteOrder>(from: &[u8], parameters: Parameters) -> Result<Self, &'static str> {\n";
-        *q += "Ok(Self {\n";
+        let mut read_data = String::with_capacity(1024 * 1024);
+        let mut write_data = String::with_capacity(1024 * 1024);
+
         for field in &s.fields {
             if field.flags.exclude {
                 continue
@@ -336,59 +343,39 @@ fn generate_struct(q: &mut String, s: &Struct, definitions: &ParsedDefinitions) 
             let size = field.size(definitions);
             let offset = field.relative_offset;
             let offset_end = field.relative_offset.checked_add(size).expect("relative_offset overflow when making const struct");
-            write(q, format_args!("{field_name}: ")).unwrap();
+
+            write(&mut read_data, format_args!("{field_name}: ")).unwrap();
 
             let mut memed = false;
             if field.flags.cache_only {
-                *q += "if parameters.cache_only_fields { ";
+                read_data += "if parameters.cache_only_fields { ";
+                write_data += "if parameters.cache_only_fields { ";
                 memed = true;
             }
             else if field.flags.non_cached {
-                *q += "if parameters.tag_only_fields { ";
+                read_data += "if parameters.tag_only_fields { ";
+                write_data += "if parameters.tag_only_fields { ";
                 memed = true;
             }
 
-            write(q, format_args!("SimpleWriteableData::read_tag_data_simple::<B>(&from[{offset}..{offset_end}], parameters)?")).unwrap();
+            write(&mut write_data, format_args!("self.{field_name}.write_tag_data_simple::<B>(&mut to[{offset}..{offset_end}], parameters);")).unwrap();
+            write(&mut read_data, format_args!("SimpleWriteableData::read_tag_data_simple::<B>(&from[{offset}..{offset_end}], parameters)?")).unwrap();
 
             if memed {
-                *q += " } else { Default::default() }";
+                read_data += " } else { Default::default() }";
+                write_data += " }";
             }
-            *q += ",\n";
+            read_data += ",\n";
         }
+
+        *q += "fn read_tag_data_simple<B: ByteOrder>(from: &[u8], parameters: Parameters) -> Result<Self, &'static str> {\n";
+        *q += "Ok(Self {\n";
+        *q += &read_data;
         *q += "})\n";
         *q += "}\n";
 
         *q += "fn write_tag_data_simple<B: ByteOrder>(&self, to: &mut [u8], parameters: Parameters) {\n";
-        for field in &s.fields {
-            if field.flags.exclude {
-                continue
-            }
-            if !matches!(field.field_type, StructFieldType::Object(_)) {
-                continue
-            }
-
-            let field_name = &field.name_rust_field;
-            let size = field.size(definitions);
-            let offset = field.relative_offset;
-            let offset_end = field.relative_offset.checked_add(size).expect("relative_offset overflow when making const struct");
-
-            let mut memed = false;
-            if field.flags.cache_only {
-                *q += "if parameters.cache_only_fields { ";
-                memed = true;
-            }
-            else if field.flags.non_cached {
-                *q += "if parameters.tag_only_fields { ";
-                memed = true;
-            }
-
-            write(q, format_args!("self.{field_name}.write_tag_data_simple::<B>(&mut to[{offset}..{offset_end}], parameters);")).unwrap();
-
-            if memed {
-                *q += " }";
-            }
-            *q += "\n";
-        }
+        *q += &write_data;
         *q += "}\n";
 
         *q += "}\n";

@@ -4,7 +4,7 @@ use funnel_web::id::{Index, ID};
 use funnel_web::rectangle::Rectangle;
 use funnel_web::string::ASCIIString;
 use funnel_web::vector::*;
-use crate::{Address, ScenarioScriptNodeValue};
+use crate::{Address, Bounds, ScenarioScriptNodeValue};
 use crate::definitions::TagGroup;
 
 /// WriteableData for simple primitives.
@@ -236,5 +236,25 @@ impl<const LEN: usize> SimpleWriteableData for ASCIIString<LEN> {
 
     fn length() -> usize {
         LEN
+    }
+}
+
+impl<T: SimpleWriteableData + Sized> SimpleWriteableData for Bounds<T> {
+    fn read_tag_data_simple<B: ByteOrder>(from: &[u8], parameters: Parameters) -> Result<Self, &'static str> {
+        let (from, to) = from.split_at(T::length());
+
+        Ok(Self {
+            from: T::read_tag_data_simple::<B>(from, parameters)?,
+            to: T::read_tag_data_simple::<B>(to, parameters)?
+        })
+    }
+    fn write_tag_data_simple<B: ByteOrder>(&self, to: &mut [u8], parameters: Parameters) {
+        let (from, to) = to.split_at_mut(T::length());
+
+        self.from.write_tag_data_simple::<B>(from, parameters);
+        self.to.write_tag_data_simple::<B>(to, parameters);
+    }
+    fn length() -> usize {
+        T::length() * 2
     }
 }

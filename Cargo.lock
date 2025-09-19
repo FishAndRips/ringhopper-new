@@ -17,7 +17,7 @@ checksum = "1fd0f2584146f6f2ef48085050886acf353beff7305ebd1ae69500e27c67f64b"
 [[package]]
 name = "funnel-web"
 version = "0.1.0"
-source = "git+https://github.com/FishAndRips/funnel-web.git?rev=d52fa441e6c06c1fea04e4e9cefd980ebea69063#d52fa441e6c06c1fea04e4e9cefd980ebea69063"
+source = "git+https://github.com/FishAndRips/funnel-web.git?rev=20f122386fee5b6ed3b50ced1751d63587cd77a1#20f122386fee5b6ed3b50ced1751d63587cd77a1"
 dependencies = [
  "libm",
 ]

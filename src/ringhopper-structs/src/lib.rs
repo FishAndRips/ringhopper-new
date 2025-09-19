@@ -4,28 +4,19 @@ extern crate alloc;
 #[cfg(feature = "std")]
 extern crate std;
 
-use core::fmt::{Debug, Formatter};
 pub use funnel_web;
 
 mod tag_path;
 mod util;
-mod io;
+mod simple_io;
 mod address;
-
-#[derive(Copy, Clone, PartialEq, Default)]
-#[repr(transparent)]
-pub struct ScenarioScriptNodeValue {
-    pub data: u32
-}
-
-impl Debug for ScenarioScriptNodeValue {
-    fn fmt(&self, f: &mut Formatter<'_>) -> core::fmt::Result {
-        f.write_fmt(format_args!("0x{}??", self.data))
-    }
-}
+mod bounds;
+mod scenario_script_node;
 
 pub use tag_path::*;
-pub use io::*;
+pub use simple_io::*;
 pub use address::*;
+pub use bounds::*;
+pub use scenario_script_node::*;
 
 pub mod definitions;
