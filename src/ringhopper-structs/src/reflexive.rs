@@ -1,0 +1,55 @@
+use crate::WriteableData;
+use alloc::vec::Vec;
+use core::ops::{Deref, DerefMut};
+
+#[derive(Clone, PartialEq, Debug, Default)]
+#[repr(transparent)]
+pub struct Reflexive<T: WriteableData> {
+    data: Vec<T>
+}
+
+impl<T: WriteableData> Reflexive<T> {
+    pub const fn new() -> Self {
+        Self { data: Vec::new() }
+    }
+    pub fn with_capacity(capacity: usize) -> Self {
+        Self { data: Vec::with_capacity(capacity) }
+    }
+}
+
+impl<T: WriteableData> Deref for Reflexive<T> {
+    type Target = Vec<T>;
+    fn deref(&self) -> &Self::Target {
+        &self.data
+    }
+}
+
+impl<T: WriteableData> DerefMut for Reflexive<T> {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.data
+    }
+}
+
+impl<T: WriteableData> IntoIterator for Reflexive<T> {
+    type Item = T;
+    type IntoIter = alloc::vec::IntoIter<T>;
+    fn into_iter(self) -> Self::IntoIter {
+        self.data.into_iter()
+    }
+}
+
+impl<'a, T: WriteableData> IntoIterator for &'a Reflexive<T> {
+    type Item = &'a T;
+    type IntoIter = core::slice::Iter<'a, T>;
+    fn into_iter(self) -> Self::IntoIter {
+        self.data.iter()
+    }
+}
+
+impl<'a, T: WriteableData> IntoIterator for &'a mut Reflexive<T> {
+    type Item = &'a mut T;
+    type IntoIter = core::slice::IterMut<'a, T>;
+    fn into_iter(self) -> Self::IntoIter {
+        self.data.iter_mut()
+    }
+}

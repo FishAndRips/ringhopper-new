@@ -1,6 +1,6 @@
 use byteorder::ByteOrder;
 use funnel_web::color::{ColorARGB, ColorRGB, Pixel32};
-use funnel_web::id::{Index, ID};
+use funnel_web::id::{Index, TagID, ID};
 use funnel_web::rectangle::Rectangle;
 use funnel_web::string::ASCIIString;
 use funnel_web::vector::*;
@@ -258,3 +258,25 @@ impl<T: SimpleWriteableData + Sized> SimpleWriteableData for Bounds<T> {
         T::length() * 2
     }
 }
+
+#[derive(Copy, Clone)]
+#[repr(C)]
+pub(crate) struct TagReferenceC {
+    pub group: TagGroup,
+    pub path_pointer: Address,
+    pub path_size: u32,
+    pub tag_id: TagID
+}
+
+io_ordered_primitive!(TagReferenceC, group, path_pointer, path_size, tag_id);
+
+
+#[derive(Copy, Clone)]
+#[repr(C)]
+pub(crate) struct ReflexiveC {
+    pub count: u32,
+    pub address: Address,
+    pub unused: u32
+}
+
+io_ordered_primitive!(ReflexiveC, count, address, unused);
