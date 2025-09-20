@@ -162,16 +162,14 @@ io_ordered_primitive!(Index, 0);
 io_ordered_primitive!(Address, 0);
 
 impl SimpleWriteableData for ScenarioScriptNodeValue {
-    fn length() -> usize {
-        4
-    }
     fn read_tag_data_simple<B: ByteOrder>(from: &[u8], parameters: Parameters) -> Result<Self, &'static str> {
-        Ok(Self {
-            data: u32::read_tag_data_simple::<B>(from, parameters)?
-        })
+        Ok(Self(u32::read_tag_data_simple::<B>(from, parameters)?))
     }
     fn write_tag_data_simple<B: ByteOrder>(&self, to: &mut [u8], parameters: Parameters) {
-        self.data.write_tag_data_simple::<B>(to, parameters)
+        self.0.write_tag_data_simple::<B>(to, parameters)
+    }
+    fn length() -> usize {
+        4
     }
 }
 

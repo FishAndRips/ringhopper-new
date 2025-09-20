@@ -2,6 +2,7 @@ use crate::WriteableData;
 use alloc::vec::Vec;
 use core::ops::{Deref, DerefMut};
 
+/// Reflexives are a resizeable array of items.
 #[derive(Clone, PartialEq, Debug, Default)]
 #[repr(transparent)]
 pub struct Reflexive<T: WriteableData> {
