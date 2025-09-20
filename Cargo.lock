@@ -79,7 +79,7 @@ version = "0.2.0"
 [[package]]
 name = "ringhopper-definitions"
 version = "0.2.0"
-source = "git+https://github.com/FishAndRips/ringhopper-definitions.git?rev=0a87cf09cf9c4616571b124821b804da80b1f837#0a87cf09cf9c4616571b124821b804da80b1f837"
+source = "git+https://github.com/FishAndRips/ringhopper-definitions.git?rev=cd469c7c3dbff12bb330be36ec850aadf2dd4443#cd469c7c3dbff12bb330be36ec850aadf2dd4443"
 dependencies = [
  "serde_json",
  "spin",

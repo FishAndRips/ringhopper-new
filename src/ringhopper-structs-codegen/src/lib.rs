@@ -18,7 +18,7 @@ pub fn generate_tag_group_enum(_: TokenStream) -> TokenStream {
     q += "pub enum TagGroup {\n";
     q += "#[default] None = 0xFFFFFFFF,\n";
     for group in definitions.groups.values() {
-        write(&mut q, format_args!("{} = 0x{:08X},\n", group.struct_name, group.fourcc_binary)).unwrap();
+        write(&mut q, format_args!("{} = 0x{:08X},\n", group.name_rust_enum, group.fourcc_binary)).unwrap();
     }
     q += "}\n";
 
@@ -33,7 +33,7 @@ pub fn generate_tag_group_enum(_: TokenStream) -> TokenStream {
     q += "match self {\n";
     q += "Self::None => \"none\",\n";
     for group in definitions.groups.values() {
-        write(&mut q, format_args!("Self::{struct_name}=>\"{name}\",\n", struct_name = group.struct_name, name = group.name)).unwrap();
+        write(&mut q, format_args!("Self::{name_enum}=>\"{name}\",\n", name_enum = group.name_rust_enum, name = group.name)).unwrap();
     }
     q += "}\n";
     q += "}\n";
@@ -45,7 +45,7 @@ pub fn generate_tag_group_enum(_: TokenStream) -> TokenStream {
     q += "match s {\n";
     q += "\"none\"=>Some(Self::None),\n";
     for group in definitions.groups.values() {
-        write(&mut q, format_args!("\"{name}\"=>Some(Self::{struct_name}),\n", struct_name = group.struct_name, name = group.name)).unwrap();
+        write(&mut q, format_args!("\"{name}\"=>Some(Self::{name_enum}),\n", name_enum = group.name_rust_enum, name = group.name)).unwrap();
     }
     q += "_ => None\n";
     q += "}\n";
@@ -64,7 +64,7 @@ pub fn generate_tag_group_enum(_: TokenStream) -> TokenStream {
     q += "pub const fn from_u32(u: u32) -> Option<TagGroup> {\n";
     q += "match u {\n";
     for group in definitions.groups.values() {
-        write(&mut q, format_args!("0x{fourcc:08X}=>Some(Self::{struct_name}),\n", struct_name = group.struct_name, fourcc = group.fourcc_binary)).unwrap();
+        write(&mut q, format_args!("0x{fourcc:08X}=>Some(Self::{name_enum}),\n", name_enum = group.name_rust_enum, fourcc = group.fourcc_binary)).unwrap();
     }
     q += "_ => None\n";
     q += "}\n";
