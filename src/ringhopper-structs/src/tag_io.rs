@@ -4,7 +4,7 @@ use core::iter::once;
 use byteorder::ByteOrder;
 use funnel_web::id::TagID;
 use alloc::string::String;
-use crate::{Address, Parameters, Reflexive, SimpleWriteableData, Strictness, TagPath, TagReference};
+use crate::{Address, Parameters, Reflexive, SimpleWriteableData, Strictness, TagPath, TagReference, MAX_PATH_LEN};
 use crate::simple_io::{ReflexiveC, TagDataC, TagReferenceC};
 
 pub trait WriteableData: Sized {
@@ -85,10 +85,10 @@ impl WriteableData for TagReference {
 
             TagReference::Set(tag_path) => {
                 let path = tag_path.path();
-                let path_size = u32::try_from(path.len())
-                    .ok()
-                    .ok_or(WriteableDataError::Other { description: "tag path length overflows a 32-bit size" })?;
+                let path_len = path.len();
+                debug_assert!(path_len < MAX_PATH_LEN);
 
+                let path_size = path_len as u32;
                 TagReferenceC {
                     group: tag_path.group(),
                     path_pointer: Address::default(),
@@ -96,6 +96,7 @@ impl WriteableData for TagReference {
                     tag_id: TagID::new()
                 }.write_tag_data::<B>(tag_data, offset, parameters)?;
 
+                tag_data.try_reserve(path_len + 1)?;
                 tag_data.extend_from_slice(path.as_bytes());
                 tag_data.push(0);
 

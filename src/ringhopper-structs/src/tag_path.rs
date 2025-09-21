@@ -4,6 +4,9 @@ use crate::definitions::TagGroup;
 use core::cmp::Ordering;
 use crate::util::*;
 
+/// Maximum length for a path.
+pub const MAX_PATH_LEN: usize = 255;
+
 /// Win32 path separator.
 pub const HALO_PATH_SEPARATOR: char = '\\';
 
@@ -85,6 +88,8 @@ const _: () = const {
 
 /// Tag path primitive
 ///
+/// Up to [`MAX_PATH_LEN`] characters are allowed.
+///
 /// All lowercase alphanumeric characters are allowed, as are some forms of punctuation.
 ///
 /// Since Halo tag paths are a subset of Win32 tag paths, some characters and directory names are
@@ -158,7 +163,14 @@ impl TagPath {
     /// assert_eq!(path.group(), TagGroup::Weapon);
     /// ```
     pub fn from_path_without_extension(path: &str, group: TagGroup) -> Result<TagPath, &'static str> {
-        let mut path_buffer = String::with_capacity(path.len());
+        let len = path.len();
+        if len > MAX_PATH_LEN {
+            return Err("maximum path length exceeded");
+        }
+
+        let mut path_buffer = String::new();
+        path_buffer.try_reserve(len).map_err(|_| "failed to allocate RAM for tag path")?;
+
         for p in path.chars() {
             if is_path_separator(p) {
                 let Some(c) = path_buffer.chars().next_back() else {
@@ -213,6 +225,7 @@ impl TagPath {
     ///
     /// Otherwise, this will just display using Halo path separators.
     #[must_use]
+    #[inline]
     pub const fn path_display(&self) -> impl Display {
         struct PathDisplay<'a> {
             path: &'a str
