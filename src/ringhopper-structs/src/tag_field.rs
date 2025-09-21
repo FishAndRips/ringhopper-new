@@ -6,7 +6,7 @@ use funnel_web::id::{Index, ID};
 use funnel_web::rectangle::Rectangle;
 use funnel_web::string::ASCIIString;
 use funnel_web::vector::*;
-use crate::Address;
+use crate::{Address, Reflexive, TagReference, WriteableData};
 
 pub trait EditableTagField: 'static + core::any::Any {
     fn get_composite(&self) -> Option<&dyn EditableCompositeTagField> {
@@ -43,8 +43,12 @@ pub trait EditableCompositeTagField: EditableTagField {
 }
 
 pub trait EditableIndexedTagField: EditableTagField {
+    fn item_count(&self) -> usize;
     fn get_item(&self, item: usize) -> Option<&dyn EditableTagField>;
     fn get_item_mut(&mut self, item: usize) -> Option<&mut dyn EditableTagField>;
+    fn remove_item(&mut self, item: usize) -> Result<(), &'static str>;
+    fn swap_items(&mut self, a: usize, b: usize) -> Result<(), &'static str>;
+    fn add_item(&mut self, at: usize) -> Result<(), &'static str>;
 }
 
 #[derive(Copy, Clone, Debug, PartialEq)]
@@ -231,6 +235,54 @@ composite_tag_fields!(Vector2DInt, x, y);
 
 impl<const SALT: u16> EditableTagField for ID<SALT> {}
 
+impl EditableTagField for TagReference {}
+impl<T: EditableTagField + WriteableData + Default> EditableTagField for Reflexive<T> {
+    fn get_indexed(&self) -> Option<&dyn EditableIndexedTagField> {
+        Some(self)
+    }
+    fn get_indexed_mut(&mut self) -> Option<&mut dyn EditableIndexedTagField> {
+        Some(self)
+    }
+}
+impl<T: EditableTagField + WriteableData + Default> EditableIndexedTagField for Reflexive<T> {
+    fn item_count(&self) -> usize {
+        self.len()
+    }
+    fn get_item(&self, item: usize) -> Option<&dyn EditableTagField> {
+        match self.get(item) {
+            Some(i) => Some(i),
+            None => None
+        }
+    }
+    fn get_item_mut(&mut self, item: usize) -> Option<&mut dyn EditableTagField> {
+        match self.get_mut(item) {
+            Some(i) => Some(i),
+            None => None
+        }
+    }
+    fn remove_item(&mut self, item: usize) -> Result<(), &'static str> {
+        if item >= self.len() {
+            return Err("out of bounds index")
+        }
+        self.remove(item);
+        Ok(())
+    }
+    fn swap_items(&mut self, a: usize, b: usize) -> Result<(), &'static str> {
+        if a.max(b) >= self.len() {
+            return Err("out of bounds index(s)")
+        }
+        self.swap(a, b);
+        Ok(())
+    }
+    fn add_item(&mut self, at: usize) -> Result<(), &'static str> {
+        if at > self.len() {
+            return Err("out of bounds index")
+        };
+        self.insert(at, T::default());
+        Ok(())
+    }
+}
+
 impl EditableTagField for CompressedFloat {}
 impl EditableTagField for CompressedVector2D {}
 impl EditableTagField for CompressedVector3D {}
@@ -311,8 +363,6 @@ impl EditableTagFieldData for Address {
         unreachable!("addresses are read-only with this interface")
     }
 }
-
-
 
 #[cfg(test)]
 mod test {
