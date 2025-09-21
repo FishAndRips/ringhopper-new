@@ -17,17 +17,17 @@ pub enum WriteableDataError {
 }
 
 impl<T: SimpleWriteableData> WriteableData for T {
-    #[inline(always)]
+    #[inline]
     fn read_tag_data<B: ByteOrder>(tag_data: &[u8], offset: usize, _cursor: &mut usize, parameters: Parameters) -> Result<Self, WriteableDataError> {
         Self::read_tag_data_simple::<B>(&tag_data[offset..add_offsets(offset, Self::length(), tag_data.len())?], parameters)
             .map_err(|description| WriteableDataError::Other { description })
     }
-    #[inline(always)]
+    #[inline]
     fn write_tag_data<B: ByteOrder>(&self, tag_data: &mut Vec<u8>, offset: usize, parameters: Parameters) -> Result<(), WriteableDataError> {
         let tag_data_len = tag_data.len();
         Ok(self.write_tag_data_simple::<B>(&mut tag_data[offset..add_offsets(offset, Self::length(), tag_data_len)?], parameters))
     }
-    #[inline(always)]
+    #[inline]
     fn base_length() -> usize {
         Self::length()
     }
@@ -156,6 +156,7 @@ impl<T: WriteableData> WriteableData for Reflexive<T> {
         Ok(())
     }
 
+    #[inline]
     fn base_length() -> usize {
         0xC
     }

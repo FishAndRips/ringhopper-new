@@ -3,8 +3,8 @@ use core::cmp::Ordering;
 /// Compare string `a` with string `b`.
 ///
 /// Useful in const contexts.
-#[inline(always)]
-pub const fn strcmp_const(a: &str, b: &str) -> Ordering {
+#[inline]
+pub(crate) const fn strcmp_const(a: &str, b: &str) -> Ordering {
     let a = a.as_bytes();
     let b = b.as_bytes();
     memcmp_const(a, b)
@@ -13,7 +13,8 @@ pub const fn strcmp_const(a: &str, b: &str) -> Ordering {
 /// Compare slice `a` with slice `b`.
 ///
 /// Useful in const contexts.
-pub const fn memcmp_const(a: &[u8], b: &[u8]) -> Ordering {
+#[inline]
+pub(crate) const fn memcmp_const(a: &[u8], b: &[u8]) -> Ordering {
     let mut z = 0usize;
     loop {
         if z == b.len() {

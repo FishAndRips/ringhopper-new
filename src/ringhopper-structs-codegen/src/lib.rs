@@ -153,6 +153,7 @@ fn generate_enum(q: &mut String, e: &Enum) {
     *q += "}\n";
 
     write(q, format_args!("impl SimpleWriteableData for {name} {{\n")).unwrap();
+    *q += "#[inline]\n";
     *q += "fn length() -> usize { 2 }\n";
 
     *q += "fn read_tag_data_simple<B: ByteOrder>(from: &[u8], parameters: Parameters) -> Result<Self, &'static str> {\n";
@@ -177,6 +178,7 @@ fn generate_enum(q: &mut String, e: &Enum) {
     *q += "}\n";
     *q += "}\n";
 
+    *q += "#[inline]\n";
     *q += "fn write_tag_data_simple<B: ByteOrder>(&self, to: &mut [u8], parameters: Parameters) {\n";
     *q += "(*self as u16).write_tag_data_simple::<B>(to, parameters);\n";
     *q += "}\n";
@@ -202,6 +204,7 @@ fn generate_bitfield(q: &mut String, b: &Bitfield) {
     let width = b.width;
 
     write(q, format_args!("impl SimpleWriteableData for {name} {{\n")).unwrap();
+    *q += "#[inline]\n";
     write(q, format_args!("fn length() -> usize {{ {width} / 8 }}\n")).unwrap();
 
     *q += "fn read_tag_data_simple<B: ByteOrder>(from: &[u8], parameters: Parameters) -> Result<Self, &'static str> {\n";
@@ -326,6 +329,7 @@ fn generate_struct(q: &mut String, s: &Struct, definitions: &ParsedDefinitions) 
 
     if s.is_const {
         write(q, format_args!("impl SimpleWriteableData for {} {{\n", s.name)).unwrap();
+        *q += "#[inline]\n";
         write(q, format_args!("fn length() -> usize {{ {} }}", s.size)).unwrap();
 
         let mut read_data = String::with_capacity(1024 * 1024);

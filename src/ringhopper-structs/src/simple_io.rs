@@ -21,13 +21,8 @@ pub trait SimpleWriteableData: Copy + Clone + Sized {
     /// `to.len()` can be assumed to be equal to `Self::length()`
     fn write_tag_data_simple<B: ByteOrder>(&self, to: &mut [u8], parameters: Parameters);
 
-    /// Length of the data.
-    ///
-    /// This is implemented as `size_of::<Self>()`. If overridden, the value should never change
-    /// between calls and should always be the same for this type.
-    fn length() -> usize {
-        size_of::<Self>()
-    }
+    /// Length of the data in bytes.
+    fn length() -> usize;
 }
 
 #[derive(Copy, Clone, PartialEq, Debug)]
@@ -46,11 +41,17 @@ pub struct Parameters {
 macro_rules! byte_io {
     ($t:ty) => {
         impl SimpleWriteableData for $t {
+            #[inline]
             fn read_tag_data_simple<B: ByteOrder>(from: &[u8], _parameters: Parameters) -> Result<Self, &'static str> {
                 Ok(from[0] as $t)
             }
+            #[inline]
             fn write_tag_data_simple<B: ByteOrder>(&self, to: &mut [u8], _parameters: Parameters) {
                 to[0] = *self as u8;
+            }
+            #[inline]
+            fn length() -> usize {
+                1
             }
         }
 
@@ -63,11 +64,17 @@ byte_io!(i8);
 macro_rules! long_io {
     ($t:ty, $read:tt, $write:tt) => {
         impl SimpleWriteableData for $t {
+            #[inline]
             fn read_tag_data_simple<B: ByteOrder>(from: &[u8], _parameters: Parameters) -> Result<Self, &'static str> {
                 Ok(B::$read(from))
             }
+            #[inline]
             fn write_tag_data_simple<B: ByteOrder>(&self, to: &mut [u8], _parameters: Parameters) {
                 B::$write(to, *self)
+            }
+            #[inline]
+            fn length() -> usize {
+                size_of::<Self>()
             }
         }
     };
@@ -80,13 +87,19 @@ long_io!(i32, read_i32, write_i32);
 long_io!(f32, read_f32, write_f32);
 
 impl SimpleWriteableData for TagGroup {
+    #[inline]
     fn read_tag_data_simple<B: ByteOrder>(from: &[u8], parameters: Parameters) -> Result<Self, &'static str> {
         let potential_fourcc = u32::read_tag_data_simple::<B>(from, parameters)?;
         Self::from_u32(potential_fourcc)
             .ok_or("unrecognized tag group fourcc")
     }
+    #[inline]
     fn write_tag_data_simple<B: ByteOrder>(&self, to: &mut [u8], parameters: Parameters) {
         self.as_u32().write_tag_data_simple::<B>(to, parameters);
+    }
+    #[inline]
+    fn length() -> usize {
+        4
     }
 }
 
@@ -119,7 +132,7 @@ macro_rules! io_ordered_primitive_read {
 }
 
 macro_rules! io_ordered_primitive {
-    ($type:ty, $($vals:tt), *) => {
+    ($type:ty, $len:expr, $($vals:tt), *) => {
         impl SimpleWriteableData for $type {
             #[allow(unused)]
             fn read_tag_data_simple<B: ByteOrder>(from: &[u8], parameters: Parameters) -> Result<Self, &'static str> {
@@ -134,51 +147,64 @@ macro_rules! io_ordered_primitive {
                 let mut current_primitive_offset = 0usize;
                 io_ordered_primitive_write!(self, parameters, to, current_primitive_offset, $($vals), *);
             }
+            #[inline]
+            fn length() -> usize {
+                $len
+            }
         }
     };
 }
 
-io_ordered_primitive!(Vector2D, x, y);
-io_ordered_primitive!(Vector3D, x, y, z);
-io_ordered_primitive!(Vector4D, x, y, z, w);
-io_ordered_primitive!(Quaternion, x, y, z, w);
-io_ordered_primitive!(Euler2D, yaw, pitch);
-io_ordered_primitive!(Euler3D, yaw, pitch, roll);
-io_ordered_primitive!(Plane2D, vector, offset);
-io_ordered_primitive!(Plane3D, vector, offset);
-io_ordered_primitive!(Angle, 0);
-io_ordered_primitive!(CompressedFloat, 0);
-io_ordered_primitive!(CompressedVector2D, 0);
-io_ordered_primitive!(CompressedVector3D, 0);
-io_ordered_primitive!(Matrix2x3, forward, up);
-io_ordered_primitive!(Matrix3x3, forward, left, up);
-io_ordered_primitive!(Matrix4x3, scale, rotation, position);
-io_ordered_primitive!(Rectangle, top, left, bottom, right);
-io_ordered_primitive!(ColorRGB, r, g, b);
-io_ordered_primitive!(ColorARGB, a, color);
-io_ordered_primitive!(Vector2DInt, x, y);
-io_ordered_primitive!(Pixel32, 0);
-io_ordered_primitive!(Index, 0);
-io_ordered_primitive!(Address, 0);
+io_ordered_primitive!(Vector2D, 4*2, x, y);
+io_ordered_primitive!(Vector3D, 4*3, x, y, z);
+io_ordered_primitive!(Vector4D, 4*4, x, y, z, w);
+io_ordered_primitive!(Quaternion, 4*4, x, y, z, w);
+io_ordered_primitive!(Euler2D, 4*2, yaw, pitch);
+io_ordered_primitive!(Euler3D, 4*3, yaw, pitch, roll);
+io_ordered_primitive!(Plane2D, 4*2+4, vector, offset);
+io_ordered_primitive!(Plane3D, 4*3+4, vector, offset);
+io_ordered_primitive!(Angle, 4, 0);
+io_ordered_primitive!(CompressedFloat, 2, 0);
+io_ordered_primitive!(CompressedVector2D, 4, 0);
+io_ordered_primitive!(CompressedVector3D, 4, 0);
+io_ordered_primitive!(Matrix2x3, Vector3D::length() * 2, forward, up);
+io_ordered_primitive!(Matrix3x3, Vector3D::length() * 3, forward, left, up);
+io_ordered_primitive!(Matrix4x3, Vector3D::length() * (3 + 1) + 4, scale, rotation, position);
+io_ordered_primitive!(Rectangle, 2*4, top, left, bottom, right);
+io_ordered_primitive!(ColorRGB, 4*3, r, g, b);
+io_ordered_primitive!(ColorARGB, 4*4, a, color);
+io_ordered_primitive!(Vector2DInt, 4, x, y);
+io_ordered_primitive!(Pixel32, 4, 0);
+io_ordered_primitive!(Index, 2, 0);
+io_ordered_primitive!(Address, 4, 0);
 
 impl SimpleWriteableData for ScenarioScriptNodeValue {
+    #[inline]
     fn read_tag_data_simple<B: ByteOrder>(from: &[u8], parameters: Parameters) -> Result<Self, &'static str> {
         Ok(Self(u32::read_tag_data_simple::<B>(from, parameters)?))
     }
+    #[inline]
     fn write_tag_data_simple<B: ByteOrder>(&self, to: &mut [u8], parameters: Parameters) {
         self.0.write_tag_data_simple::<B>(to, parameters)
     }
+    #[inline]
     fn length() -> usize {
         4
     }
 }
 
 impl<const SALT: u16> SimpleWriteableData for ID<SALT> {
+    #[inline]
     fn read_tag_data_simple<B: ByteOrder>(from: &[u8], parameters: Parameters) -> Result<Self, &'static str> {
         Self::from_u32(u32::read_tag_data_simple::<B>(from, parameters)?).ok_or("invalid id data")
     }
+    #[inline]
     fn write_tag_data_simple<B: ByteOrder>(&self, to: &mut [u8], parameters: Parameters) {
         self.as_u32().write_tag_data_simple::<B>(to, parameters)
+    }
+    #[inline]
+    fn length() -> usize {
+        4
     }
 }
 
@@ -217,6 +243,7 @@ impl<T: SimpleWriteableData + Sized, const LEN: usize> SimpleWriteableData for [
         }
     }
 
+    #[inline]
     fn length() -> usize {
         T::length() * LEN
     }
@@ -232,6 +259,7 @@ impl<const LEN: usize> SimpleWriteableData for ASCIIString<LEN> {
         to.copy_from_slice(self.bytes())
     }
 
+    #[inline]
     fn length() -> usize {
         LEN
     }
@@ -252,6 +280,7 @@ impl<T: SimpleWriteableData + Sized> SimpleWriteableData for Bounds<T> {
         self.from.write_tag_data_simple::<B>(from, parameters);
         self.to.write_tag_data_simple::<B>(to, parameters);
     }
+    #[inline]
     fn length() -> usize {
         T::length() * 2
     }
@@ -266,7 +295,7 @@ pub(crate) struct TagReferenceC {
     pub tag_id: TagID
 }
 
-io_ordered_primitive!(TagReferenceC, group, path_pointer, path_size, tag_id);
+io_ordered_primitive!(TagReferenceC, 0x10, group, path_pointer, path_size, tag_id);
 
 
 #[derive(Copy, Clone)]
@@ -277,4 +306,4 @@ pub(crate) struct ReflexiveC {
     pub unused: u32
 }
 
-io_ordered_primitive!(ReflexiveC, count, address, unused);
+io_ordered_primitive!(ReflexiveC, 0xC, count, address, unused);

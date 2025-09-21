@@ -11,6 +11,7 @@ pub const HALO_PATH_SEPARATOR: char = '\\';
 pub const UNIX_PATH_SEPARATOR: char = '/';
 
 /// Return true if the character is a path separator.
+#[inline]
 pub const fn is_path_separator(c: char) -> bool {
     #[cfg(feature = "std")]
     if c == std::path::MAIN_SEPARATOR {
@@ -199,6 +200,7 @@ impl TagPath {
     }
 
     /// Return the tag path using Halo path separators (i.e. `\`).
+    #[inline]
     pub const fn path(&self) -> &str {
         self.path.as_str()
     }
@@ -233,6 +235,7 @@ impl TagPath {
                 Ok(())
             }
             #[cfg(not(feature = "std"))]
+            #[inline]
             fn fmt(&self, f: &mut Formatter<'_>) -> core::fmt::Result {
                 f.write_str(self.path)
             }
@@ -244,6 +247,7 @@ impl TagPath {
     }
 
     /// Return the tag group.
+    #[inline]
     pub const fn group(&self) -> TagGroup {
         self.group
     }
@@ -267,12 +271,14 @@ impl TagPath {
     /// assert_eq!(path.path(), "my\\new\\path");
     /// assert_eq!(path.group(), TagGroup::Weapon);
     /// ```
+    #[inline]
     pub fn set_path(&mut self, new_path: &str) -> Result<(), &'static str> {
         self.path = Self::from_path_without_extension(new_path, self.group)?.path;
         Ok(())
     }
 
     /// Set the tag group.
+    #[inline]
     pub const fn set_group(&mut self, new_group: TagGroup) {
         self.group = new_group;
     }
@@ -300,6 +306,7 @@ pub enum TagReference {
 }
 
 impl Default for TagReference {
+    #[inline]
     fn default() -> Self {
         Self::Unset(TagGroup::None)
     }
