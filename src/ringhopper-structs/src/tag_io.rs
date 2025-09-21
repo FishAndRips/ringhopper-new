@@ -7,6 +7,7 @@ use crate::simple_io::{ReflexiveC, TagReferenceC};
 pub trait WriteableData: Sized {
     fn read_tag_data<B: ByteOrder>(tag_data: &[u8], offset: usize, cursor: &mut usize, parameters: Parameters) -> Result<Self, WriteableDataError>;
     fn write_tag_data<B: ByteOrder>(&self, tag_data: &mut Vec<u8>, offset: usize, parameters: Parameters) -> Result<(), WriteableDataError>;
+    #[must_use]
     fn base_length() -> usize;
 }
 
@@ -25,7 +26,8 @@ impl<T: SimpleWriteableData> WriteableData for T {
     #[inline]
     fn write_tag_data<B: ByteOrder>(&self, tag_data: &mut Vec<u8>, offset: usize, parameters: Parameters) -> Result<(), WriteableDataError> {
         let tag_data_len = tag_data.len();
-        Ok(self.write_tag_data_simple::<B>(&mut tag_data[offset..add_offsets(offset, Self::length(), tag_data_len)?], parameters))
+        self.write_tag_data_simple::<B>(&mut tag_data[offset..add_offsets(offset, Self::length(), tag_data_len)?], parameters);
+        Ok(())
     }
     #[inline]
     fn base_length() -> usize {

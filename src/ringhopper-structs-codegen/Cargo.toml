@@ -9,3 +9,6 @@ proc-macro = true
 
 [dependencies]
 ringhopper-definitions = { git = "https://github.com/FishAndRips/ringhopper-definitions.git", rev = "cd469c7c3dbff12bb330be36ec850aadf2dd4443" }
+
+[lints]
+workspace = true

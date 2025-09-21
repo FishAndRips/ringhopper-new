@@ -12,6 +12,7 @@ pub const UNIX_PATH_SEPARATOR: char = '/';
 
 /// Return true if the character is a path separator.
 #[inline]
+#[must_use]
 pub const fn is_path_separator(c: char) -> bool {
     #[cfg(feature = "std")]
     if c == std::path::MAIN_SEPARATOR {
@@ -21,7 +22,7 @@ pub const fn is_path_separator(c: char) -> bool {
 }
 
 /// A list of characters banned in Win32 paths.
-pub const WIN32_BANNED_PATH_CHARACTERS: &'static [char] = &[
+pub const WIN32_BANNED_PATH_CHARACTERS: &[char] = &[
     '"', '*', '/', ':', '<', '>', '?', '|'
 ];
 
@@ -38,7 +39,7 @@ const _: () = const {
 };
 
 /// A list of directory names that are banned in Win32 paths.
-pub const WIN32_BANNED_DIRECTORIES: &'static [&'static str] = &[
+pub const WIN32_BANNED_DIRECTORIES: &[&str] = &[
     "aux",
     "com0",
     "com1",
@@ -160,7 +161,7 @@ impl TagPath {
         let mut path_buffer = String::with_capacity(path.len());
         for p in path.chars() {
             if is_path_separator(p) {
-                let Some(c) = path_buffer.chars().rev().next() else {
+                let Some(c) = path_buffer.chars().next_back() else {
                     return Err("path starts with path separator")
                 };
 
@@ -182,7 +183,7 @@ impl TagPath {
             }
         }
 
-        let Some(last_char) = path_buffer.chars().rev().next() else {
+        let Some(last_char) = path_buffer.chars().next_back() else {
             return Err("no path given")
         };
 
@@ -201,6 +202,7 @@ impl TagPath {
 
     /// Return the tag path using Halo path separators (i.e. `\`).
     #[inline]
+    #[must_use]
     pub const fn path(&self) -> &str {
         self.path.as_str()
     }
@@ -210,6 +212,7 @@ impl TagPath {
     /// If the `std` feature is enabled, this will display with the system's native path separators.
     ///
     /// Otherwise, this will just display using Halo path separators.
+    #[must_use]
     pub const fn path_display(&self) -> impl Display {
         struct PathDisplay<'a> {
             path: &'a str
@@ -248,6 +251,7 @@ impl TagPath {
 
     /// Return the tag group.
     #[inline]
+    #[must_use]
     pub const fn group(&self) -> TagGroup {
         self.group
     }

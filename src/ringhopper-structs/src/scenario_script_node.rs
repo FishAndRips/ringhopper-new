@@ -11,48 +11,56 @@ pub struct ScenarioScriptNodeValue(pub u32);
 impl ScenarioScriptNodeValue {
     /// Create the value from a float (real).
     #[inline]
+    #[must_use]
     pub const fn from_f32(value: f32) -> Self {
         Self(value.to_bits())
     }
 
     /// Create the value from a 32-bit signed integer (long).
     #[inline]
+    #[must_use]
     pub const fn from_i32(value: i32) -> Self {
         Self(value as u32)
     }
 
     /// Create the value from a 16-bit signed integer (short).
     #[inline]
+    #[must_use]
     pub const fn from_i16(value: i16) -> Self {
         Self((value as u32) | 0xFFFF0000)
     }
 
     /// Create the value from a boolean.
     #[inline]
+    #[must_use]
     pub const fn from_bool(value: bool) -> Self {
         Self((value as u32) | 0xFFFFFF00)
     }
 
     /// Create the value from an ID.
     #[inline]
+    #[must_use]
     pub const fn from_id<const SALT: u16>(id: ID<SALT>) -> Self {
         Self(id.as_u32())
     }
 
     /// Get the value as a float (real).
     #[inline]
+    #[must_use]
     pub const fn as_f32(&self) -> f32 {
         f32::from_bits(self.0)
     }
 
     /// Get the value as a 32-bit signed integer (long).
     #[inline]
+    #[must_use]
     pub const fn as_i32(&self) -> i32 {
         self.0 as i32
     }
 
     /// Get the value as a 16-bit signed integer (short).
     #[inline]
+    #[must_use]
     pub const fn as_i16(&self) -> i16 {
         (self.0 & 0xFFFF) as i16
     }
@@ -61,6 +69,7 @@ impl ScenarioScriptNodeValue {
     ///
     /// Returns `None` if the lowest 8 bits do not correspond to `0x00` or `0x01`.
     #[inline]
+    #[must_use]
     pub const fn as_bool(&self) -> Option<bool> {
         match self.0 & 0xFF {
             0 => Some(false),
@@ -73,6 +82,7 @@ impl ScenarioScriptNodeValue {
     ///
     /// Returns `None` if the ID is not valid.
     #[inline]
+    #[must_use]
     pub const fn as_id<const SALT: u16>(&self) -> Option<ID<SALT>> {
         ID::<SALT>::from_u32(self.0)
     }

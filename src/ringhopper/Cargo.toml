@@ -8,3 +8,6 @@ edition = "2024"
 
 [features]
 std = []
+
+[lints]
+workspace = true

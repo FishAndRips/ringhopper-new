@@ -123,7 +123,7 @@ pub fn generate_tag_structs(_: TokenStream) -> TokenStream {
 
     for i in definitions.objects.values() {
         match i {
-            NamedObject::Struct(s) => generate_struct(&mut q, s, &definitions),
+            NamedObject::Struct(s) => generate_struct(&mut q, s, definitions),
             _ => continue
         }
     }
@@ -316,7 +316,7 @@ fn generate_struct(q: &mut String, s: &Struct, definitions: &ParsedDefinitions) 
                 write(q, format_args!("pub {}: ", field.name_rust_field)).unwrap();
                 match field.count {
                     FieldCount::Bounds => write(q, format_args!("Bounds<{value_name}>")).unwrap(),
-                    FieldCount::One => *q += &value_name,
+                    FieldCount::One => *q += value_name,
                     FieldCount::Array(l) => write(q, format_args!("[{value_name};{l}]")).unwrap()
                 }
 

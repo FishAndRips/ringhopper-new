@@ -22,6 +22,7 @@ pub trait SimpleWriteableData: Copy + Clone + Sized {
     fn write_tag_data_simple<B: ByteOrder>(&self, to: &mut [u8], parameters: Parameters);
 
     /// Length of the data in bytes.
+    #[must_use]
     fn length() -> usize;
 }
 

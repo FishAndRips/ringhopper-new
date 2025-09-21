@@ -12,3 +12,6 @@ byteorder = "1.5.0"
 [features]
 default = []
 std = []
+
+[lints]
+workspace = true

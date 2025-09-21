@@ -11,10 +11,12 @@ pub struct Reflexive<T: WriteableData> {
 
 impl<T: WriteableData> Reflexive<T> {
     #[inline]
+    #[must_use]
     pub const fn new() -> Self {
         Self { data: Vec::new() }
     }
     #[inline]
+    #[must_use]
     pub fn with_capacity(capacity: usize) -> Self {
         Self { data: Vec::with_capacity(capacity) }
     }

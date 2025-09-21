@@ -1,3 +1,6 @@
 [workspace]
 members = ["src/invader", "src/ringhopper", "src/ringhopper-structs", "src/ringhopper-structs-codegen"]
 resolver = "3"
+
+[workspace.lints.clippy]
+must_use_candidate = "warn"
