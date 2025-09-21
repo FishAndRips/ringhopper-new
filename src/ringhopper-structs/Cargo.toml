@@ -5,7 +5,7 @@ license = "GPL-3.0-only"
 edition = "2024"
 
 [dependencies]
-funnel-web = { git = "https://github.com/FishAndRips/funnel-web.git", rev = "20f122386fee5b6ed3b50ced1751d63587cd77a1" }
+funnel-web = { git = "https://github.com/FishAndRips/funnel-web.git", rev = "e92d02fc972ade8269985eed3359176db4ec6c39" }
 ringhopper-structs-codegen = { path = "../ringhopper-structs-codegen" }
 byteorder = "1.5.0"
 
