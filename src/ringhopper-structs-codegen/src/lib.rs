@@ -330,50 +330,54 @@ fn generate_struct(q: &mut String, s: &Struct, definitions: &ParsedDefinitions) 
         *q += "#[inline]\n";
         write(q, format_args!("fn length() -> usize {{ {} }}", s.size)).unwrap();
 
-        let (read_data, write_data) = generate_read_write_tag_data(
+        let rw= generate_field_data(
             s,
             definitions,
-            |read_data, field, offset_start, offset_end, endianness| {
-                let field_name = &field.name_rust_field;
-                write(read_data, format_args!("{field_name}: ")).unwrap();
+            &[
+                |read_data, field, offset_start, offset_end, endianness| {
+                    let field_name = &field.name_rust_field;
+                    write(read_data, format_args!("{field_name}: ")).unwrap();
 
-                let mut conditionally_read = false;
-                if field.flags.cache_only {
-                    *read_data += "if parameters.cache_only_fields { ";
-                    conditionally_read = true;
-                }
-                else if field.flags.non_cached {
-                    *read_data += "if parameters.tag_only_fields { ";
-                    conditionally_read = true;
-                }
+                    let mut conditionally_read = false;
+                    if field.flags.cache_only {
+                        *read_data += "if parameters.cache_only_fields { ";
+                        conditionally_read = true;
+                    }
+                    else if field.flags.non_cached {
+                        *read_data += "if parameters.tag_only_fields { ";
+                        conditionally_read = true;
+                    }
 
-                write(read_data, format_args!("SimpleWriteableData::read_tag_data_simple::<{endianness}>(&from[{offset_start}..{offset_end}], parameters)?")).unwrap();
+                    write(read_data, format_args!("SimpleWriteableData::read_tag_data_simple::<{endianness}>(&from[{offset_start}..{offset_end}], parameters)?")).unwrap();
 
-                if conditionally_read {
-                    *read_data += "} else { Default::default() }";
-                }
-                *read_data += ",";
-            },
-            |write_data, field, offset_start, offset_end, endianness| {
-                let field_name = &field.name_rust_field;
+                    if conditionally_read {
+                        *read_data += "} else { Default::default() }";
+                    }
+                    *read_data += ",";
+                },
+                |write_data, field, offset_start, offset_end, endianness| {
+                    let field_name = &field.name_rust_field;
 
-                let mut conditionally_written = false;
-                if field.flags.cache_only {
-                    *write_data += "if parameters.cache_only_fields { ";
-                    conditionally_written = true;
-                }
-                else if field.flags.non_cached {
-                    *write_data += "if parameters.tag_only_fields { ";
-                    conditionally_written = true;
-                }
+                    let mut conditionally_written = false;
+                    if field.flags.cache_only {
+                        *write_data += "if parameters.cache_only_fields { ";
+                        conditionally_written = true;
+                    }
+                    else if field.flags.non_cached {
+                        *write_data += "if parameters.tag_only_fields { ";
+                        conditionally_written = true;
+                    }
 
-                write(write_data, format_args!("self.{field_name}.write_tag_data_simple::<{endianness}>(&mut to[{offset_start}..{offset_end}], parameters);")).unwrap();
+                    write(write_data, format_args!("self.{field_name}.write_tag_data_simple::<{endianness}>(&mut to[{offset_start}..{offset_end}], parameters);")).unwrap();
 
-                if conditionally_written {
-                    *write_data += " }";
+                    if conditionally_written {
+                        *write_data += " }";
+                    }
                 }
-            }
+            ]
         );
+
+        let [read_data, write_data] = rw.as_slice() else { panic!("generate_struct passed/expected the wrong number of fns - is const") };
 
         *q += "fn read_tag_data_simple<B: ByteOrder>(from: &[u8], parameters: Parameters) -> Result<Self, &'static str> {\n";
         *q += "Ok(Self {\n";
@@ -392,51 +396,55 @@ fn generate_struct(q: &mut String, s: &Struct, definitions: &ParsedDefinitions) 
         *q += "#[inline]\n";
         write(q, format_args!("fn base_length() -> usize {{ {} }}", s.size)).unwrap();
 
-        let (read_data, write_data) = generate_read_write_tag_data(
+        let rw = generate_field_data(
             s,
             definitions,
-            |read_data, field, offset_start, _offset_end, endianness| {
-                let field_name = &field.name_rust_field;
-                write(read_data, format_args!("{field_name}: ")).unwrap();
+            &[
+                |read_data, field, offset_start, _offset_end, endianness| {
+                    let field_name = &field.name_rust_field;
+                    write(read_data, format_args!("{field_name}: ")).unwrap();
 
-                let mut conditionally_read = false;
-                if field.flags.cache_only {
-                    *read_data += "if parameters.cache_only_fields { ";
-                    conditionally_read = true;
-                }
-                else if field.flags.non_cached {
-                    *read_data += "if parameters.tag_only_fields { ";
-                    conditionally_read = true;
-                }
+                    let mut conditionally_read = false;
+                    if field.flags.cache_only {
+                        *read_data += "if parameters.cache_only_fields { ";
+                        conditionally_read = true;
+                    }
+                    else if field.flags.non_cached {
+                        *read_data += "if parameters.tag_only_fields { ";
+                        conditionally_read = true;
+                    }
 
-                write(read_data, format_args!("WriteableData::read_tag_data::<{endianness}>(tag_data, {offset_start}, cursor, parameters)?")).unwrap();
+                    write(read_data, format_args!("WriteableData::read_tag_data::<{endianness}>(tag_data, {offset_start}, cursor, parameters)?")).unwrap();
 
-                if conditionally_read {
-                    *read_data += "} else { Default::default() }";
-                }
-                *read_data += ",\n";
-            },
-            |write_data, field, offset_start, _offset_end, endianness| {
-                let field_name = &field.name_rust_field;
+                    if conditionally_read {
+                        *read_data += "} else { Default::default() }";
+                    }
+                    *read_data += ",\n";
+                },
+                |write_data, field, offset_start, _offset_end, endianness| {
+                    let field_name = &field.name_rust_field;
 
-                let mut conditionally_written = false;
-                if field.flags.cache_only {
-                    *write_data += "if parameters.cache_only_fields { ";
-                    conditionally_written = true;
-                }
-                else if field.flags.non_cached {
-                    *write_data += "if parameters.tag_only_fields { ";
-                    conditionally_written = true;
-                }
+                    let mut conditionally_written = false;
+                    if field.flags.cache_only {
+                        *write_data += "if parameters.cache_only_fields { ";
+                        conditionally_written = true;
+                    }
+                    else if field.flags.non_cached {
+                        *write_data += "if parameters.tag_only_fields { ";
+                        conditionally_written = true;
+                    }
 
-                write(write_data, format_args!("self.{field_name}.write_tag_data::<{endianness}>(tag_data, offset + {offset_start}, parameters)?;")).unwrap();
+                    write(write_data, format_args!("self.{field_name}.write_tag_data::<{endianness}>(tag_data, offset + {offset_start}, parameters)?;")).unwrap();
 
-                if conditionally_written {
-                    *write_data += " }";
+                    if conditionally_written {
+                        *write_data += " }";
+                    }
+                    *write_data += "\n";
                 }
-                *write_data += "\n";
-            }
+            ]
         );
+
+        let [read_data, write_data] = rw.as_slice() else { panic!("generate_struct passed/expected the wrong number of fns - not const") };
 
         *q += "fn read_tag_data<B: ByteOrder>(tag_data: &[u8], offset: usize, cursor: &mut usize, parameters: Parameters) -> Result<Self, WriteableDataError> {\n";
         *q += "Ok(Self {\n";
@@ -454,15 +462,13 @@ fn generate_struct(q: &mut String, s: &Struct, definitions: &ParsedDefinitions) 
 }
 
 /// Returns (read_data, write_data)
-fn generate_read_write_tag_data(
+fn generate_field_data(
     s: &Struct,
     definitions: &ParsedDefinitions,
 
-    on_read: fn(read_data: &mut String, field: &StructField, offset_start: usize, offset_end: usize, endianness: &str),
-    on_write: fn(write_data: &mut String, field: &StructField, offset_start: usize, offset_end: usize, endianness: &str),
-) -> (String, String) {
-    let mut read_data = String::with_capacity(1024 * 1024);
-    let mut write_data = String::with_capacity(1024 * 1024);
+    fns: &[fn(read_data: &mut String, field: &StructField, offset_start: usize, offset_end: usize, endianness: &str)],
+) -> Vec<String> {
+    let mut buffers = vec![String::with_capacity(1024 * 1024); fns.len()];
 
     for field in &s.fields {
         if field.flags.exclude {
@@ -483,9 +489,10 @@ fn generate_read_write_tag_data(
             "B"
         };
 
-        on_write(&mut write_data, field, offset, offset_end, endianness);
-        on_read(&mut read_data, field, offset, offset_end, endianness);
+        for i in buffers.iter_mut().enumerate() {
+            fns[i.0](i.1, field, offset, offset_end, endianness);
+        }
     }
 
-    (read_data, write_data)
+    buffers
 }
