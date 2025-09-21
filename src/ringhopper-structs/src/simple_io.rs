@@ -104,49 +104,36 @@ impl SimpleWriteableData for TagGroup {
     }
 }
 
-macro_rules! io_ordered_primitive_write {
-    ($self:expr, $parameters:expr, $to:expr, $c:tt, $q:tt) => {
-        let start = $c;
-        let end = $c + size_of_val(&$self.$q);
-        $self.$q.write_tag_data_simple::<B>(&mut $to[start..end], $parameters);
-        $c = end;
-    };
-
-    ($self:expr, $parameters:expr, $to:expr, $c:tt, $q:tt, $($vals:tt), +) => {
-        io_ordered_primitive_write!($self, $parameters, $to, $c, $q);
-        io_ordered_primitive_write!($self, $parameters, $to, $c, $($vals), +);
-    };
-}
-
-macro_rules! io_ordered_primitive_read {
-    ($self:expr, $parameters:expr, $from:expr, $c:tt, $q:tt) => {
-        let start = $c;
-        let end = $c + size_of_val(&$self.$q);
-        $self.$q = SimpleWriteableData::read_tag_data_simple::<B>(&$from[start..end], $parameters)?;
-        $c = end;
-    };
-
-    ($self:expr, $parameters:expr, $from:expr, $c:tt, $q:tt, $($vals:tt), +) => {
-        io_ordered_primitive_read!($self, $parameters, $from, $c, $q);
-        io_ordered_primitive_read!($self, $parameters, $from, $c, $($vals), +);
-    };
-}
-
 macro_rules! io_ordered_primitive {
     ($type:ty, $len:expr, $($vals:tt), *) => {
         impl SimpleWriteableData for $type {
             #[allow(unused)]
             fn read_tag_data_simple<B: ByteOrder>(from: &[u8], parameters: Parameters) -> Result<Self, &'static str> {
                 let mut current_primitive_offset = 0usize;
-                // SAFETY: Everything that uses io_ordered_primitive!() is valid to be zeroed out
+
+                // SAFETY: Everything that uses io_ordered_primitive!() is valid to be zeroed out,
+                // and we need an existing struct for size_of_val to work.
                 let mut result: Self = unsafe { core::mem::zeroed() };
-                io_ordered_primitive_read!(result, parameters, from, current_primitive_offset, $($vals), *);
+
+                $(
+                    let start = current_primitive_offset;
+                    let end = current_primitive_offset + size_of_val(&result.$vals);
+                    result.$vals = SimpleWriteableData::read_tag_data_simple::<B>(&from[start..end], parameters)?;
+                    current_primitive_offset = end;
+                )*
+
                 Ok(result)
             }
             #[allow(unused)]
             fn write_tag_data_simple<B: ByteOrder>(&self, to: &mut [u8], parameters: Parameters) {
                 let mut current_primitive_offset = 0usize;
-                io_ordered_primitive_write!(self, parameters, to, current_primitive_offset, $($vals), *);
+
+                $(
+                    let start = current_primitive_offset;
+                    let end = current_primitive_offset + size_of_val(&self.$vals);
+                    self.$vals.write_tag_data_simple::<B>(&mut to[start..end], parameters);
+                    current_primitive_offset = end;
+                )*
             }
             #[inline]
             fn length() -> usize {
