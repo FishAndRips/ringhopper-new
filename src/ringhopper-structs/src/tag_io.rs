@@ -263,7 +263,7 @@ impl WriteableData for String {
 }
 
 fn parse_utf16_string(data_with_null_terminator: &[u8], parameters: Parameters) -> Result<String, WriteableDataError> {
-    if data_with_null_terminator.len() % 2 != 0 {
+    if !data_with_null_terminator.len().is_multiple_of(2) {
         return Err(WriteableDataError::Other { description: "UTF-16 string has improper length" })
     }
     if data_with_null_terminator.is_empty() {
@@ -271,7 +271,7 @@ fn parse_utf16_string(data_with_null_terminator: &[u8], parameters: Parameters) 
     }
 
     let (data, null_terminator) = data_with_null_terminator.split_at(data_with_null_terminator.len() - 2);
-    if null_terminator != &[0,0] && parameters.strictness > Strictness::Relaxed {
+    if null_terminator != [0,0] && parameters.strictness > Strictness::Relaxed {
         // On the game, this null terminator will be nulled out at runtime anyway, but such tags
         // are quite dangerous.
         return Err(WriteableDataError::Other { description: "UTF-16 string is not null terminated" })
