@@ -1,4 +1,5 @@
 use proc_macro::TokenStream;
+use std::collections::HashSet;
 use ringhopper_definitions::{Bitfield, Enum, FieldCount, FieldObject, NamedObject, ParsedDefinitions, SizeableObject, Struct, StructField, StructFieldType};
 use std::fmt::write;
 
@@ -83,53 +84,50 @@ pub fn generate_tag_group_enum(_: TokenStream) -> TokenStream {
 }
 
 #[proc_macro]
-pub fn generate_tag_enums(_: TokenStream) -> TokenStream {
+pub fn generate_tag_data_defs(_: TokenStream) -> TokenStream {
     let definitions = ringhopper_definitions::load_all_definitions();
 
-    let mut q = String::with_capacity(1024 * 1024 * 2);
+    let all_modules_needed_set: HashSet<&str> = definitions
+        .objects
+        .values()
+        .map(|o| o.definition_file())
+        .collect();
 
-    for i in definitions.objects.values() {
-        match i {
-            NamedObject::Enum(e) => generate_enum(&mut q, e),
-            _ => continue,
+    let mut all_modules_needed_vec: Vec<&str> = Vec::with_capacity(all_modules_needed_set.len());
+    all_modules_needed_vec.extend(all_modules_needed_set);
+    all_modules_needed_vec.dedup();
+
+    let mut q = String::with_capacity(1024 * 1024 * 32);
+    for file in &all_modules_needed_vec {
+        let mut safe_name = file[file.rfind("/").unwrap() + 1..file.len() - 5].to_string(); // omit ".json"
+        if safe_name == "enum" {
+            safe_name += "s";
         }
+
+        write(&mut q, format_args!("pub mod {safe_name} {{\n")).unwrap();
+        write(&mut q, format_args!("use super::*;\n")).unwrap();
+
+        for i in definitions.objects.values() {
+            if i.definition_file() != *file {
+                continue;
+            }
+
+            match i {
+                NamedObject::Struct(s) => generate_struct(&mut q, s, definitions),
+                NamedObject::Bitfield(b) => generate_bitfield(&mut q, b),
+                NamedObject::Enum(e) => generate_enum(&mut q, e)
+            }
+        }
+
+        q += "}\n";
+
+        write(&mut q, format_args!("use {safe_name}::*;\n")).unwrap();
     }
 
     q.parse().expect("failed to parse generate_tag_structs result")
 }
 
-#[proc_macro]
-pub fn generate_tag_bitfields(_: TokenStream) -> TokenStream {
-    let definitions = ringhopper_definitions::load_all_definitions();
 
-    let mut q = String::with_capacity(1024 * 1024 * 2);
-
-    for i in definitions.objects.values() {
-        match i {
-            NamedObject::Bitfield(b) => generate_bitfield(&mut q, b),
-            _ => continue,
-        }
-    }
-
-    q.parse().expect("failed to parse generate_tag_structs result")
-}
-
-
-#[proc_macro]
-pub fn generate_tag_structs(_: TokenStream) -> TokenStream {
-    let definitions = ringhopper_definitions::load_all_definitions();
-
-    let mut q = String::with_capacity(1024 * 1024 * 8);
-
-    for i in definitions.objects.values() {
-        match i {
-            NamedObject::Struct(s) => generate_struct(&mut q, s, definitions),
-            _ => continue
-        }
-    }
-
-    q.parse().expect("failed to parse generate_tag_structs result")
-}
 
 fn generate_enum(q: &mut String, e: &Enum) {
     let name = &e.name;
