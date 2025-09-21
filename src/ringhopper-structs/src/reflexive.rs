@@ -20,6 +20,16 @@ impl<T: WriteableData> Reflexive<T> {
     pub fn with_capacity(capacity: usize) -> Self {
         Self { data: Vec::with_capacity(capacity) }
     }
+    #[inline]
+    #[must_use]
+    pub fn with_vec(vec: Vec<T>) -> Self {
+        Self { data: vec }
+    }
+    #[inline]
+    #[must_use]
+    pub fn into_inner(self) -> Vec<T> {
+        self.data
+    }
 }
 
 impl<T: WriteableData> Deref for Reflexive<T> {

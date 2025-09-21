@@ -367,8 +367,9 @@ impl EditableTagFieldData for Address {
 #[cfg(test)]
 mod test {
     use funnel_web::string::String32;
-    use crate::EditableTagField;
+    use crate::{EditableTagField, Reflexive};
     use alloc::string::ToString;
+    use funnel_web::vector::Vector3D;
 
     #[test]
     fn editable_string() {
@@ -393,5 +394,55 @@ mod test {
         bool_field_data.set_value("true").unwrap();
         assert_eq!(bool_field_data.get_value().to_string(), "true");
         assert!(bool);
+    }
+
+    #[test]
+    fn editable_composite() {
+        let mut v: Vector3D = Vector3D {
+            x: 0.0,
+            y: 1.0,
+            z: 2.0
+        };
+
+        let v_c = v.get_composite_mut().unwrap();
+        v_c.get_field_mut("x").unwrap().get_field_data_mut().unwrap().set_value("1337").unwrap();
+        v_c.get_field_mut("y").unwrap().get_field_data_mut().unwrap().set_value("1234").unwrap();
+        v_c.get_field_mut("z").unwrap().get_field_data_mut().unwrap().set_value("9001").unwrap();
+
+        // NaN is banned and does not change the final result
+        assert!(v_c.get_field_mut("z").unwrap().get_field_data_mut().unwrap().set_value("NaN").is_err());
+
+        assert_eq!(v, Vector3D { x: 1337.0, y: 1234.0, z: 9001.0 });
+    }
+
+    #[test]
+    fn editable_indexed() {
+        let mut r: Reflexive<Vector3D> = Reflexive::new();
+
+        let r_c = r.get_indexed_mut().unwrap();
+        for i in 0..64 {
+            r_c.add_item(i).unwrap();
+        }
+
+        for i in 0..r_c.item_count() {
+            let offset = i * 3;
+            let field = r_c.get_item_mut(i).unwrap().get_composite_mut().unwrap();
+            for j in field.fields().iter().enumerate() {
+                let offset = offset + j.0;
+                field.get_field_mut(j.1).unwrap().get_field_data_mut().unwrap().set_value(&offset.to_string()).unwrap();
+            }
+        }
+
+        r_c.swap_items(22, 63).unwrap();
+
+        assert_eq!(r[63].x, 66.0);
+        assert_eq!(r[63].y, 67.0);
+        assert_eq!(r[63].z, 68.0);
+
+        assert_eq!(r[22].x, 189.0);
+        assert_eq!(r[22].y, 190.0);
+        assert_eq!(r[22].z, 191.0);
+
+        assert_eq!(r.get(64), None);
     }
 }
