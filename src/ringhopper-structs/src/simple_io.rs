@@ -26,7 +26,7 @@ pub trait SimpleWriteableData: Copy + Clone + Sized {
     fn length() -> usize;
 }
 
-#[derive(Copy, Clone, PartialEq, Debug)]
+#[derive(Copy, Clone, PartialEq, PartialOrd, Debug)]
 pub enum Strictness {
     Relaxed,
     Strict
@@ -287,7 +287,7 @@ impl<T: SimpleWriteableData + Sized> SimpleWriteableData for Bounds<T> {
     }
 }
 
-#[derive(Copy, Clone)]
+#[derive(Copy, Clone, Default)]
 #[repr(C)]
 pub(crate) struct TagReferenceC {
     pub group: TagGroup,
@@ -299,7 +299,7 @@ pub(crate) struct TagReferenceC {
 io_ordered_primitive!(TagReferenceC, 0x10, group, path_pointer, path_size, tag_id);
 
 
-#[derive(Copy, Clone)]
+#[derive(Copy, Clone, Default)]
 #[repr(C)]
 pub(crate) struct ReflexiveC {
     pub count: u32,
@@ -308,3 +308,16 @@ pub(crate) struct ReflexiveC {
 }
 
 io_ordered_primitive!(ReflexiveC, 0xC, count, address, unused);
+
+
+#[derive(Copy, Clone, Default)]
+#[repr(C)]
+pub(crate) struct TagDataC {
+    pub length: u32,
+    pub flags: u32,
+    pub file_offset: u32,
+    pub data: Address,
+    pub unused: u32
+}
+
+io_ordered_primitive!(TagDataC, 0x14, length, flags, file_offset, data, unused);

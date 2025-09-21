@@ -1,5 +1,5 @@
 use proc_macro::TokenStream;
-use ringhopper_definitions::{Bitfield, Enum, FieldCount, FieldObject, NamedObject, ParsedDefinitions, SizeableObject, Struct, StructFieldType};
+use ringhopper_definitions::{Bitfield, Enum, FieldCount, FieldObject, NamedObject, ParsedDefinitions, SizeableObject, Struct, StructField, StructFieldType};
 use std::fmt::write;
 
 #[proc_macro]
@@ -271,7 +271,7 @@ fn generate_struct(q: &mut String, s: &Struct, definitions: &ParsedDefinitions) 
                 let value_name = match object {
                     FieldObject::NamedObject(n) => n.as_str(),
                     FieldObject::Reflexive(r) => {
-                        buffer = format!("Vec<{r}>");
+                        buffer = format!("Reflexive<{r}>");
                         buffer.as_str()
                     },
                     FieldObject::TagReference { .. } => "TagReference",
@@ -332,45 +332,50 @@ fn generate_struct(q: &mut String, s: &Struct, definitions: &ParsedDefinitions) 
         *q += "#[inline]\n";
         write(q, format_args!("fn length() -> usize {{ {} }}", s.size)).unwrap();
 
-        let mut read_data = String::with_capacity(1024 * 1024);
-        let mut write_data = String::with_capacity(1024 * 1024);
+        let (read_data, write_data) = generate_read_write_tag_data(
+            s,
+            definitions,
+            |read_data, field, offset_start, offset_end, endianness| {
+                let field_name = &field.name_rust_field;
+                write(read_data, format_args!("{field_name}: ")).unwrap();
 
-        for field in &s.fields {
-            if field.flags.exclude {
-                continue
+                let mut conditionally_read = false;
+                if field.flags.cache_only {
+                    *read_data += "if parameters.cache_only_fields { ";
+                    conditionally_read = true;
+                }
+                else if field.flags.non_cached {
+                    *read_data += "if parameters.tag_only_fields { ";
+                    conditionally_read = true;
+                }
+
+                write(read_data, format_args!("SimpleWriteableData::read_tag_data_simple::<{endianness}>(&from[{offset_start}..{offset_end}], parameters)?")).unwrap();
+
+                if conditionally_read {
+                    *read_data += "} else { Default::default() }";
+                }
+                *read_data += ",";
+            },
+            |write_data, field, offset_start, offset_end, endianness| {
+                let field_name = &field.name_rust_field;
+
+                let mut conditionally_written = false;
+                if field.flags.cache_only {
+                    *write_data += "if parameters.cache_only_fields { ";
+                    conditionally_written = true;
+                }
+                else if field.flags.non_cached {
+                    *write_data += "if parameters.tag_only_fields { ";
+                    conditionally_written = true;
+                }
+
+                write(write_data, format_args!("self.{field_name}.write_tag_data_simple::<{endianness}>(&mut to[{offset_start}..{offset_end}], parameters);")).unwrap();
+
+                if conditionally_written {
+                    *write_data += " }";
+                }
             }
-            if !matches!(field.field_type, StructFieldType::Object(_)) {
-                continue
-            }
-
-            let field_name = &field.name_rust_field;
-            let size = field.size(definitions);
-            let offset = field.relative_offset;
-            let offset_end = field.relative_offset.checked_add(size).expect("relative_offset overflow when making const struct");
-
-            write(&mut read_data, format_args!("{field_name}: ")).unwrap();
-
-            let mut memed = false;
-            if field.flags.cache_only {
-                read_data += "if parameters.cache_only_fields { ";
-                write_data += "if parameters.cache_only_fields { ";
-                memed = true;
-            }
-            else if field.flags.non_cached {
-                read_data += "if parameters.tag_only_fields { ";
-                write_data += "if parameters.tag_only_fields { ";
-                memed = true;
-            }
-
-            write(&mut write_data, format_args!("self.{field_name}.write_tag_data_simple::<B>(&mut to[{offset}..{offset_end}], parameters);")).unwrap();
-            write(&mut read_data, format_args!("SimpleWriteableData::read_tag_data_simple::<B>(&from[{offset}..{offset_end}], parameters)?")).unwrap();
-
-            if memed {
-                read_data += " } else { Default::default() }";
-                write_data += " }";
-            }
-            read_data += ",\n";
-        }
+        );
 
         *q += "fn read_tag_data_simple<B: ByteOrder>(from: &[u8], parameters: Parameters) -> Result<Self, &'static str> {\n";
         *q += "Ok(Self {\n";
@@ -385,6 +390,104 @@ fn generate_struct(q: &mut String, s: &Struct, definitions: &ParsedDefinitions) 
         *q += "}\n";
     }
     else {
-        // TODO
+        write(q, format_args!("impl WriteableData for {} {{\n", s.name)).unwrap();
+        *q += "#[inline]\n";
+        write(q, format_args!("fn base_length() -> usize {{ {} }}", s.size)).unwrap();
+
+        let (read_data, write_data) = generate_read_write_tag_data(
+            s,
+            definitions,
+            |read_data, field, offset_start, _offset_end, endianness| {
+                let field_name = &field.name_rust_field;
+                write(read_data, format_args!("{field_name}: ")).unwrap();
+
+                let mut conditionally_read = false;
+                if field.flags.cache_only {
+                    *read_data += "if parameters.cache_only_fields { ";
+                    conditionally_read = true;
+                }
+                else if field.flags.non_cached {
+                    *read_data += "if parameters.tag_only_fields { ";
+                    conditionally_read = true;
+                }
+
+                write(read_data, format_args!("WriteableData::read_tag_data::<{endianness}>(tag_data, {offset_start}, cursor, parameters)?")).unwrap();
+
+                if conditionally_read {
+                    *read_data += "} else { Default::default() }";
+                }
+                *read_data += ",\n";
+            },
+            |write_data, field, offset_start, _offset_end, endianness| {
+                let field_name = &field.name_rust_field;
+
+                let mut conditionally_written = false;
+                if field.flags.cache_only {
+                    *write_data += "if parameters.cache_only_fields { ";
+                    conditionally_written = true;
+                }
+                else if field.flags.non_cached {
+                    *write_data += "if parameters.tag_only_fields { ";
+                    conditionally_written = true;
+                }
+
+                write(write_data, format_args!("self.{field_name}.write_tag_data::<{endianness}>(tag_data, offset + {offset_start}, parameters)?;")).unwrap();
+
+                if conditionally_written {
+                    *write_data += " }";
+                }
+                *write_data += "\n";
+            }
+        );
+
+        *q += "fn read_tag_data<B: ByteOrder>(tag_data: &[u8], offset: usize, cursor: &mut usize, parameters: Parameters) -> Result<Self, WriteableDataError> {\n";
+        *q += "Ok(Self {\n";
+        *q += &read_data;
+        *q += "})\n";
+        *q += "}\n";
+
+        *q += "fn write_tag_data<B: ByteOrder>(&self, tag_data: &mut Vec<u8>, offset: usize, parameters: Parameters) -> Result<(), WriteableDataError> {\n";
+        *q += &write_data;
+        *q += "Ok(())\n";
+        *q += "}\n";
+
+        *q += "}\n";
     }
+}
+
+/// Returns (read_data, write_data)
+fn generate_read_write_tag_data(
+    s: &Struct,
+    definitions: &ParsedDefinitions,
+
+    on_read: fn(read_data: &mut String, field: &StructField, offset_start: usize, offset_end: usize, endianness: &str),
+    on_write: fn(write_data: &mut String, field: &StructField, offset_start: usize, offset_end: usize, endianness: &str),
+) -> (String, String) {
+    let mut read_data = String::with_capacity(1024 * 1024);
+    let mut write_data = String::with_capacity(1024 * 1024);
+
+    for field in &s.fields {
+        if field.flags.exclude {
+            continue
+        }
+        if !matches!(field.field_type, StructFieldType::Object(_)) {
+            continue
+        }
+
+        let size = field.size(definitions);
+        let offset = field.relative_offset;
+        let offset_end = field.relative_offset.checked_add(size).expect("relative_offset overflow");
+
+        let endianness = if field.flags.little_endian_in_tags {
+            "byteorder::LittleEndian"
+        }
+        else {
+            "B"
+        };
+
+        on_write(&mut write_data, field, offset, offset_end, endianness);
+        on_read(&mut read_data, field, offset, offset_end, endianness);
+    }
+
+    (read_data, write_data)
 }

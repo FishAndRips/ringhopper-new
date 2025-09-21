@@ -1,8 +1,11 @@
 use alloc::vec::Vec;
+use alloc::collections::TryReserveError;
+use core::iter::once;
 use byteorder::ByteOrder;
 use funnel_web::id::TagID;
-use crate::{Address, Parameters, Reflexive, SimpleWriteableData, TagPath, TagReference};
-use crate::simple_io::{ReflexiveC, TagReferenceC};
+use alloc::string::String;
+use crate::{Address, Parameters, Reflexive, SimpleWriteableData, Strictness, TagPath, TagReference};
+use crate::simple_io::{ReflexiveC, TagDataC, TagReferenceC};
 
 pub trait WriteableData: Sized {
     fn read_tag_data<B: ByteOrder>(tag_data: &[u8], offset: usize, cursor: &mut usize, parameters: Parameters) -> Result<Self, WriteableDataError>;
@@ -14,7 +17,14 @@ pub trait WriteableData: Sized {
 #[derive(Debug, Clone, PartialEq)]
 pub enum WriteableDataError {
     OutOfBounds { offset_requested: usize, size_requested: usize },
-    Other { description: &'static str }
+    Other { description: &'static str },
+    LowMemory
+}
+
+impl From<TryReserveError> for WriteableDataError {
+    fn from(_value: TryReserveError) -> Self {
+        Self::LowMemory
+    }
 }
 
 impl<T: SimpleWriteableData> WriteableData for T {
@@ -139,10 +149,11 @@ impl<T: WriteableData> WriteableData for Reflexive<T> {
             .checked_mul(count)
             .ok_or(WriteableDataError::Other { description: "Number of elements times base_length exceeds usize::MAX" })?;
 
+        tag_data.try_reserve(total_base_length)?;
+
         let tag_data_start = tag_data.len();
-        let new_tag_data_end = tag_data_start
-            .checked_add(total_base_length)
-            .ok_or(WriteableDataError::Other { description: "Number of elements times base_length plus tag_data.len() exceeds usize::MAX" })?;
+        let new_tag_data_end = tag_data_start + total_base_length;
+        tag_data.resize(new_tag_data_end, 0);
 
         ReflexiveC {
             count: count_u32,
@@ -150,7 +161,6 @@ impl<T: WriteableData> WriteableData for Reflexive<T> {
             unused: 0
         }.write_tag_data::<B>(tag_data, offset, parameters)?;
 
-        tag_data.resize(new_tag_data_end, 0);
         for (offset, element) in (tag_data_start..new_tag_data_end).step_by(base_length).zip(self.iter()) {
             element.write_tag_data::<B>(tag_data, offset, parameters)?;
         }
@@ -162,4 +172,155 @@ impl<T: WriteableData> WriteableData for Reflexive<T> {
     fn base_length() -> usize {
         0xC
     }
+}
+
+impl WriteableData for Vec<u8> {
+    fn read_tag_data<B: ByteOrder>(tag_data: &[u8], offset: usize, cursor: &mut usize, parameters: Parameters) -> Result<Self, WriteableDataError> {
+        let data = TagDataC::read_tag_data::<B>(tag_data, offset, cursor, parameters)?;
+        let length = data.length as usize;
+        if length == 0 {
+            return Ok(Vec::new());
+        }
+
+        let cursor_base = *cursor;
+        let cursor_end = add_offsets(cursor_base, length, tag_data.len())?;
+        *cursor = cursor_end;
+
+        Ok(tag_data[cursor_base..cursor_end].to_vec())
+    }
+
+    fn write_tag_data<B: ByteOrder>(&self, tag_data: &mut Vec<u8>, offset: usize, parameters: Parameters) -> Result<(), WriteableDataError> {
+        tag_data.try_reserve(self.len())?;
+
+        let length = u32::try_from(self.len())
+            .ok()
+            .ok_or(WriteableDataError::Other { description: "Maximum data size of 4 GiB reached/exceeded" })?;
+
+        tag_data.try_reserve(length as usize)?;
+
+        TagDataC {
+            length,
+            ..Default::default()
+        }.write_tag_data::<B>(tag_data, offset, parameters)?;
+
+        tag_data.copy_from_slice(self.as_slice());
+
+        Ok(())
+    }
+
+    #[inline]
+    fn base_length() -> usize {
+        0x14
+    }
+}
+
+impl WriteableData for String {
+    fn read_tag_data<B: ByteOrder>(tag_data: &[u8], offset: usize, cursor: &mut usize, parameters: Parameters) -> Result<Self, WriteableDataError> {
+        let data = TagDataC::read_tag_data::<B>(tag_data, offset, cursor, parameters)?;
+        let length = data.length as usize;
+
+        let cursor_base = *cursor;
+        let cursor_end = add_offsets(cursor_base, length, tag_data.len())?;
+        *cursor = cursor_end;
+
+        let data = &tag_data[cursor_base..cursor_end];
+        parse_utf16_string(data, parameters)
+    }
+
+    fn write_tag_data<B: ByteOrder>(&self, tag_data: &mut Vec<u8>, offset: usize, parameters: Parameters) -> Result<(), WriteableDataError> {
+        let length_bytes = encode_utf16_null_terminated_string(self)
+            .count()
+            .checked_mul(size_of::<u16>())
+            .and_then(|v| u32::try_from(v).ok())
+            .ok_or(WriteableDataError::Other { description: "Maximum string size reached/exceeded 4 GiB when encoded into UTF-16" })?;
+
+        tag_data.try_reserve(length_bytes as usize)?;
+
+        TagDataC {
+            length: length_bytes,
+            ..Default::default()
+        }.write_tag_data::<B>(tag_data, offset, parameters)?;
+
+        let mut null_byte_added = false;
+        for b in encode_utf16_null_terminated_string(self) {
+            if null_byte_added {
+                // TODO: On relaxed mode, we can probably just cut the string off here
+                return Err(WriteableDataError::Other { description: "Invalid string data (interior null bytes detected)" });
+            }
+            if b == 0 {
+                null_byte_added = true;
+            }
+            tag_data.copy_from_slice(&b.to_le_bytes());
+        }
+
+        Ok(())
+    }
+
+    #[inline]
+    fn base_length() -> usize {
+        0x14
+    }
+}
+
+fn parse_utf16_string(data_with_null_terminator: &[u8], parameters: Parameters) -> Result<String, WriteableDataError> {
+    if data_with_null_terminator.len() % 2 != 0 {
+        return Err(WriteableDataError::Other { description: "UTF-16 string has improper length" })
+    }
+    if data_with_null_terminator.is_empty() {
+        return Err(WriteableDataError::Other { description: "UTF-16 string has no data (thus is not null-terminated)" })
+    }
+
+    let (data, null_terminator) = data_with_null_terminator.split_at(data_with_null_terminator.len() - 2);
+    if null_terminator != &[0,0] && parameters.strictness > Strictness::Relaxed {
+        // On the game, this null terminator will be nulled out at runtime anyway, but such tags
+        // are quite dangerous.
+        return Err(WriteableDataError::Other { description: "UTF-16 string is not null terminated" })
+    };
+
+    if data.is_empty() {
+        return Ok(String::new())
+    }
+
+    // SAFETY: We know that this is fine because we checked that data.len() is divisible by 2.
+    let chunks = unsafe { data.as_chunks_unchecked::<2>() };
+
+    let wchar_iterator = || chunks
+        .iter()
+        .copied()
+        .map(u16::from_le_bytes);
+
+    let mut null_terminator_encountered = false;
+    let mut len = 0usize;
+
+    for c in char::decode_utf16(wchar_iterator()) {
+        let Ok(c) = c else {
+            return Err(WriteableDataError::Other { description: "Invalid UTF-16" });
+        };
+        if null_terminator_encountered {
+            if parameters.strictness > Strictness::Relaxed {
+                return Err(WriteableDataError::Other { description: "Interior null byte detected" });
+            }
+            break;
+        }
+        if c == '\x00' {
+            null_terminator_encountered = true;
+        }
+        len = len.checked_add(c.len_utf8())
+            // super unlikely but you never know
+            .ok_or(WriteableDataError::LowMemory)?;
+    }
+
+    let mut string = String::new();
+    string.try_reserve(len)?;
+
+    for c in char::decode_utf16(wchar_iterator()) {
+        let c = c.expect("was checked in an earlier loop to be valid UTF-16");
+        string.push(c);
+    }
+
+    Ok(string)
+}
+
+fn encode_utf16_null_terminated_string(string: &str) -> impl Iterator<Item = u16> {
+    string.encode_utf16().chain(once(0))
 }
