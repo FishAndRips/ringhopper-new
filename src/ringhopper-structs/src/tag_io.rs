@@ -4,8 +4,15 @@ use core::iter::once;
 use byteorder::ByteOrder;
 use funnel_web::id::TagID;
 use alloc::string::String;
+use funnel_web::crc::CRC32;
 use crate::{Address, Parameters, Reflexive, SimpleWriteableData, Strictness, TagPath, TagReference, MAX_PATH_LEN};
+use crate::definitions::tag::TagFileHeader;
+use crate::definitions::TagGroup;
 use crate::simple_io::{ReflexiveC, TagDataC, TagReferenceC};
+
+pub trait MainTagStruct: WriteableData {
+    fn tag_group() -> TagGroup;
+}
 
 pub trait WriteableData: Sized {
     fn read_tag_data<B: ByteOrder>(tag_data: &[u8], offset: usize, cursor: &mut usize, parameters: Parameters) -> Result<Self, WriteableDataError>;
@@ -204,7 +211,7 @@ impl WriteableData for Vec<u8> {
             ..Default::default()
         }.write_tag_data::<B>(tag_data, offset, parameters)?;
 
-        tag_data.copy_from_slice(self.as_slice());
+        tag_data.extend_from_slice(self.as_slice());
 
         Ok(())
     }
@@ -251,7 +258,7 @@ impl WriteableData for String {
             if b == 0 {
                 null_byte_added = true;
             }
-            tag_data.copy_from_slice(&b.to_le_bytes());
+            tag_data.extend_from_slice(&b.to_le_bytes());
         }
 
         Ok(())
@@ -324,4 +331,73 @@ fn parse_utf16_string(data_with_null_terminator: &[u8], parameters: Parameters) 
 
 fn encode_utf16_null_terminated_string(string: &str) -> impl Iterator<Item = u16> {
     string.encode_utf16().chain(once(0))
+}
+
+pub fn read_tag_file<T: MainTagStruct>(data: &[u8], parameters: Parameters) -> Result<T, WriteableDataError> {
+    let header_size = TagFileHeader::length();
+    if data.len() < header_size {
+        return Err(WriteableDataError::Other { description: "invalid tag file (no header)" })
+    };
+
+    let mut cursor = header_size;
+    let header = TagFileHeader::read_tag_data::<byteorder::BigEndian>(data, 0x0, &mut cursor, parameters)?;
+    let group = T::tag_group();
+    if header.tag_group != group {
+        return Err(WriteableDataError::Other { description: "invalid tag file (wrong group)" })
+    }
+    if header.version != group.version() {
+        return Err(WriteableDataError::Other { description: "invalid tag file (wrong version for tag group)" })
+    }
+
+    // should not have changed
+    debug_assert_eq!(cursor, header_size);
+
+    let base_length = T::base_length();
+    let base_offset = cursor;
+    cursor = add_offsets(cursor, base_length, data.len())?;
+
+    if parameters.strictness > Strictness::Relaxed {
+        if header.tag_data_offset as usize != base_offset {
+            return Err(WriteableDataError::Other { description: "invalid tag file (bad tag data offset)" })
+        }
+
+        let mut crc = CRC32::new();
+        crc.update(&data[base_offset..]);
+        if crc.crc() != header.crc32 {
+            return Err(WriteableDataError::Other { description: "invalid tag file (wrong CRC32 - tag is corrupted)" })
+        }
+    }
+
+    T::read_tag_data::<byteorder::BigEndian>(data, base_offset, &mut cursor, parameters)
+}
+
+pub fn write_tag_file<T: MainTagStruct>(tag_data: &T, parameters: Parameters) -> Result<Vec<u8>, WriteableDataError> {
+    let mut final_data = Vec::new();
+
+    let header_size = TagFileHeader::length();
+    let initial_size = header_size.checked_add(T::base_length()).expect("base_length of header and tag group overflow; that is bad");
+    final_data.try_reserve(initial_size)?;
+    final_data.resize(initial_size, 0);
+
+    tag_data.write_tag_data::<byteorder::BigEndian>(&mut final_data, header_size, parameters)?;
+
+    let tag_group = T::tag_group();
+    let final_header = TagFileHeader {
+        tag_group,
+        crc32: {
+            let mut crc = CRC32::new();
+            crc.update(&final_data[header_size..]);
+            crc.crc()
+        },
+        tag_data_offset: header_size as u32,
+        internal_size: 0,
+        version: tag_group.version(),
+        first_internal_index: 0,
+        second_internal_index: 0xFF,
+        blam_fourcc: 0x626C616D,
+    };
+
+    final_header.write_tag_data_simple::<byteorder::BigEndian>(&mut final_data[..header_size], parameters);
+
+    Ok(final_data)
 }

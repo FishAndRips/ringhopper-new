@@ -53,6 +53,18 @@ pub fn generate_tag_group_enum(_: TokenStream) -> TokenStream {
     q += "}\n";
 
 
+    // version impl
+    q += "/// Get the version of the tag group.\n";
+    q += "pub const fn version(self) -> u16 {\n";
+    q += "match self {\n";
+    q += "Self::None=>0,\n";
+    for group in definitions.groups.values() {
+        write(&mut q, format_args!("Self::{name_enum}=>{version},\n", name_enum = group.name_rust_enum, version = group.version)).unwrap();
+    }
+    q += "}\n";
+    q += "}\n";
+
+
     // as_u32 impl
     q += "/// Get the integer equivalent of this value.\n";
     q += "pub const fn as_u32(self) -> u32 {\n";
@@ -67,6 +79,7 @@ pub fn generate_tag_group_enum(_: TokenStream) -> TokenStream {
     for group in definitions.groups.values() {
         write(&mut q, format_args!("0x{fourcc:08X}=>Some(Self::{name_enum}),\n", name_enum = group.name_rust_enum, fourcc = group.fourcc_binary)).unwrap();
     }
+    q += "0xFFFFFFFF | 0x00000000 => Some(TagGroup::None),\n";
     q += "_ => None\n";
     q += "}\n";
     q += "}\n";
@@ -381,12 +394,12 @@ fn generate_struct(q: &mut String, s: &Struct, definitions: &ParsedDefinitions) 
 
         *q += "fn read_tag_data_simple<B: ByteOrder>(from: &[u8], parameters: Parameters) -> Result<Self, &'static str> {\n";
         *q += "Ok(Self {\n";
-        *q += &read_data;
+        *q += read_data;
         *q += "})\n";
         *q += "}\n";
 
         *q += "fn write_tag_data_simple<B: ByteOrder>(&self, to: &mut [u8], parameters: Parameters) {\n";
-        *q += &write_data;
+        *q += write_data;
         *q += "}\n";
 
         *q += "}\n";
@@ -404,20 +417,28 @@ fn generate_struct(q: &mut String, s: &Struct, definitions: &ParsedDefinitions) 
                     let field_name = &field.name_rust_field;
                     write(read_data, format_args!("{field_name}: ")).unwrap();
 
-                    let mut conditionally_read = false;
-                    if field.flags.cache_only {
-                        *read_data += "if parameters.cache_only_fields { ";
-                        conditionally_read = true;
-                    }
-                    else if field.flags.non_cached {
-                        *read_data += "if parameters.tag_only_fields { ";
-                        conditionally_read = true;
-                    }
-
-                    write(read_data, format_args!("WriteableData::read_tag_data::<{endianness}>(tag_data, {offset_start}, cursor, parameters)?")).unwrap();
+                    let conditionally_read = field.flags.cache_only || field.flags.non_cached;
 
                     if conditionally_read {
-                        *read_data += "} else { Default::default() }";
+                        *read_data += "{ let value = ";
+                    }
+
+                    // for non-const, we still have to try to read the data (to advance the cursor) but then we discard the result
+                    write(read_data, format_args!("WriteableData::read_tag_data::<{endianness}>(tag_data, offset + {offset_start}, cursor, parameters)?")).unwrap();
+
+                    if conditionally_read {
+                        *read_data += "; ";
+                    }
+
+                    if conditionally_read {
+                        *read_data += "if ";
+                        if field.flags.cache_only {
+                            *read_data += "parameters.cache_only_fields";
+                        }
+                        else if field.flags.non_cached {
+                            *read_data += "parameters.tag_only_fields";
+                        }
+                        *read_data += " { value } else { Default::default() } }";
                     }
                     *read_data += ",\n";
                 },
@@ -448,17 +469,29 @@ fn generate_struct(q: &mut String, s: &Struct, definitions: &ParsedDefinitions) 
 
         *q += "fn read_tag_data<B: ByteOrder>(tag_data: &[u8], offset: usize, cursor: &mut usize, parameters: Parameters) -> Result<Self, WriteableDataError> {\n";
         *q += "Ok(Self {\n";
-        *q += &read_data;
+        *q += read_data;
         *q += "})\n";
         *q += "}\n";
 
         *q += "fn write_tag_data<B: ByteOrder>(&self, tag_data: &mut Vec<u8>, offset: usize, parameters: Parameters) -> Result<(), WriteableDataError> {\n";
-        *q += &write_data;
+        *q += write_data;
         *q += "Ok(())\n";
         *q += "}\n";
 
         *q += "}\n";
     }
+
+    for i in definitions.groups.values() {
+        if &i.struct_name == name {
+            write(q, format_args!("impl MainTagStruct for {name} {{")).unwrap();
+            *q += "#[inline]\n";
+            write(q, format_args!("fn tag_group() -> TagGroup {{ TagGroup::{} }}", i.name_rust_enum)).unwrap();
+            *q += "}";
+            break
+        }
+    }
+
+
 }
 
 /// Returns (read_data, write_data)
@@ -466,7 +499,7 @@ fn generate_field_data(
     s: &Struct,
     definitions: &ParsedDefinitions,
 
-    fns: &[fn(read_data: &mut String, field: &StructField, offset_start: usize, offset_end: usize, endianness: &str)],
+    fns: &[IOFn],
 ) -> Vec<String> {
     let mut buffers = vec![String::with_capacity(1024 * 1024); fns.len()];
 
@@ -496,3 +529,5 @@ fn generate_field_data(
 
     buffers
 }
+
+type IOFn = fn(read_data: &mut String, field: &StructField, offset_start: usize, offset_end: usize, endianness: &str);

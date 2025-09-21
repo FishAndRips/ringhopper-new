@@ -17,7 +17,7 @@ checksum = "1fd0f2584146f6f2ef48085050886acf353beff7305ebd1ae69500e27c67f64b"
 [[package]]
 name = "funnel-web"
 version = "0.1.0"
-source = "git+https://github.com/FishAndRips/funnel-web.git?rev=e92d02fc972ade8269985eed3359176db4ec6c39#e92d02fc972ade8269985eed3359176db4ec6c39"
+source = "git+https://github.com/FishAndRips/funnel-web.git?rev=9cdd8d7330da8f87db18b1f4bf6c0f7f405d6cd7#9cdd8d7330da8f87db18b1f4bf6c0f7f405d6cd7"
 dependencies = [
  "libm",
 ]
@@ -79,7 +79,7 @@ version = "0.2.0"
 [[package]]
 name = "ringhopper-definitions"
 version = "0.2.0"
-source = "git+https://github.com/FishAndRips/ringhopper-definitions.git?rev=91be169c7f8af5327eec1964a4516f334a2b32c7#91be169c7f8af5327eec1964a4516f334a2b32c7"
+source = "git+https://github.com/FishAndRips/ringhopper-definitions.git?rev=884aa37a171b0edc36a7e836f23ed10fc36a7482#884aa37a171b0edc36a7e836f23ed10fc36a7482"
 dependencies = [
  "serde_json",
  "spin",
