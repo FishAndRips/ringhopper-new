@@ -6,8 +6,8 @@ extern crate std;
 
 pub use funnel_web;
 
-mod tag_path;
 mod util;
+mod tag_path;
 mod simple_io;
 mod tag_io;
 mod address;

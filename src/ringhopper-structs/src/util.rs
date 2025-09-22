@@ -1,4 +1,5 @@
 use core::cmp::Ordering;
+use core::iter::once;
 
 /// Compare string `a` with string `b`.
 ///
@@ -33,4 +34,17 @@ pub(crate) const fn memcmp_const(a: &[u8], b: &[u8]) -> Ordering {
         }
         z += 1;
     }
+}
+
+/// Encode string into a null-terminated UTF-8 string.
+#[inline]
+#[expect(unused)]
+pub(crate) fn encode_utf8_null_terminated_string(string: &str) -> impl Iterator<Item = char> {
+    string.chars().chain(once('\x00'))
+}
+
+/// Encode string into a null-terminated UTF-16 string.
+#[inline]
+pub(crate) fn encode_utf16_null_terminated_string(string: &str) -> impl Iterator<Item = u16> {
+    string.encode_utf16().chain(once(0))
 }

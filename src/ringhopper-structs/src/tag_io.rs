@@ -1,9 +1,10 @@
 use alloc::vec::Vec;
 use alloc::collections::TryReserveError;
-use core::iter::once;
+use alloc::borrow::Cow;
 use byteorder::ByteOrder;
 use funnel_web::id::TagID;
 use alloc::string::String;
+use core::any::type_name;
 use funnel_web::crc::CRC32;
 use crate::{Address, Parameters, Reflexive, SimpleWriteableData, Strictness, TagPath, TagReference, MAX_PATH_LEN};
 use crate::definitions::tag::TagFileHeader;
@@ -23,9 +24,54 @@ pub trait WriteableData: Sized {
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum WriteableDataError {
-    OutOfBounds { offset_requested: usize, size_requested: usize },
-    Other { description: &'static str },
+    OutOfBounds { offset_requested: usize, size_requested: usize, maximum_size: usize },
+    Generic { type_name: &'static str, offset: usize, cursor: usize, description: Cow<'static, str> },
+    Other { description: Cow<'static, str> },
     LowMemory
+}
+
+impl WriteableDataError {
+    pub(crate) fn generic_error_static<T>(offset: usize, cursor: usize, description: &'static str) -> Self {
+        Self::generic_error_moo::<T>(offset, cursor, Cow::Borrowed(description))
+    }
+    #[expect(unused)]
+    pub(crate) fn generic_error_alloc<T>(offset: usize, cursor: usize, description: String) -> Self {
+        Self::generic_error_moo::<T>(offset, cursor, Cow::Owned(description))
+    }
+    pub(crate) fn generic_error_moo<T>(offset: usize, cursor: usize, description: Cow<'static, str>) -> Self {
+        WriteableDataError::Generic {
+            type_name: type_name::<T>(),
+            offset,
+            cursor,
+            description
+        }
+    }
+}
+
+impl core::fmt::Display for WriteableDataError {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        match self {
+            WriteableDataError::OutOfBounds { offset_requested, size_requested, maximum_size } => f.write_fmt(
+                format_args!("out of bounds (tried to access a region of 0x{offset_requested:08X} and length 0x{size_requested:08X} from a region of size 0x{maximum_size:08X})")
+            ),
+            WriteableDataError::Generic { type_name, offset, cursor, description } => {
+                if *cursor == 0 {
+                    f.write_fmt(
+                        format_args!("error when processing {type_name} at (offset=0x{offset:08X}): {description}")
+                    )
+                }
+                else {
+                    f.write_fmt(
+                        format_args!("error when processing {type_name} at (offset=0x{offset:08X}, cursor={cursor:08X}): {description}")
+                    )
+                }
+            },
+            WriteableDataError::Other { description } => f.write_fmt(
+                format_args!("error: {description}")
+            ),
+            WriteableDataError::LowMemory => f.write_str("not enough memory for this operation (allocation failed)")
+        }
+    }
 }
 
 impl From<TryReserveError> for WriteableDataError {
@@ -36,9 +82,9 @@ impl From<TryReserveError> for WriteableDataError {
 
 impl<T: SimpleWriteableData> WriteableData for T {
     #[inline]
-    fn read_tag_data<B: ByteOrder>(tag_data: &[u8], offset: usize, _cursor: &mut usize, parameters: Parameters) -> Result<Self, WriteableDataError> {
+    fn read_tag_data<B: ByteOrder>(tag_data: &[u8], offset: usize, cursor: &mut usize, parameters: Parameters) -> Result<Self, WriteableDataError> {
         Self::read_tag_data_simple::<B>(&tag_data[offset..add_offsets(offset, Self::length(), tag_data.len())?], parameters)
-            .map_err(|description| WriteableDataError::Other { description })
+            .map_err(|description| WriteableDataError::generic_error_static::<Self>(offset, *cursor, description))
     }
     #[inline]
     fn write_tag_data<B: ByteOrder>(&self, tag_data: &mut Vec<u8>, offset: usize, parameters: Parameters) -> Result<(), WriteableDataError> {
@@ -55,7 +101,7 @@ impl<T: SimpleWriteableData> WriteableData for T {
 pub(crate) fn add_offsets(offset: usize, size: usize, buffer_size: usize) -> Result<usize, WriteableDataError> {
     offset.checked_add(size)
         .and_then(|c| if c > buffer_size { None } else { Some(c) })
-        .ok_or(WriteableDataError::OutOfBounds { offset_requested: offset, size_requested: size })
+        .ok_or(WriteableDataError::OutOfBounds { offset_requested: offset, size_requested: size, maximum_size: buffer_size })
 }
 
 impl WriteableData for TagReference {
@@ -69,16 +115,17 @@ impl WriteableData for TagReference {
         let end = add_offsets(*cursor, len, tag_data.len())?;
         let end_with_null_terminator = add_offsets(end, 1, tag_data.len())?;
 
-        let Some(tag_path_str) = core::ffi::CStr::from_bytes_with_nul(&tag_data[*cursor..end_with_null_terminator])
+        let string_offset = *cursor;
+        let Some(tag_path_str) = core::ffi::CStr::from_bytes_with_nul(&tag_data[string_offset..end_with_null_terminator])
             .ok()
             .and_then(|s| s.to_str().ok()) else {
-            return Err(WriteableDataError::Other { description: "tag reference is invalid or not properly null terminated" })
+            return Err(WriteableDataError::generic_error_static::<Self>(offset, string_offset, "tag reference is invalid or not properly null terminated"))
         };
 
         *cursor = end_with_null_terminator;
 
         TagPath::from_path_without_extension(tag_path_str, tag_reference.group)
-            .map_err(|description| WriteableDataError::Other { description })
+            .map_err(|description| WriteableDataError::generic_error_static::<Self>(offset, string_offset, description))
             .map(TagReference::Set)
     }
     fn write_tag_data<B: ByteOrder>(&self, tag_data: &mut Vec<u8>, offset: usize, parameters: Parameters) -> Result<(), WriteableDataError> {
@@ -127,7 +174,7 @@ impl<T: WriteableData> WriteableData for Reflexive<T> {
         let base_length = T::base_length();
         let total_base_length = base_length
             .checked_mul(count)
-            .ok_or(WriteableDataError::Other { description: "Number of elements times base_length exceeds usize::MAX" })?;
+            .ok_or(WriteableDataError::generic_error_static::<Self>(offset, *cursor, "Number of elements times base_length exceeds usize::MAX"))?;
 
         let cursor_base = *cursor;
         let cursor_end = add_offsets(cursor_base, total_base_length, tag_data.len())?;
@@ -150,12 +197,12 @@ impl<T: WriteableData> WriteableData for Reflexive<T> {
         let count = self.len();
         let count_u32 = u32::try_from(count)
             .ok()
-            .ok_or(WriteableDataError::Other { description: "Number of elements exceeds u32::MAX" })?;
+            .ok_or(WriteableDataError::generic_error_static::<Self>(offset, 0, "Number of elements exceeds u32::MAX"))?;
 
         let base_length = T::base_length();
         let total_base_length = base_length
             .checked_mul(count)
-            .ok_or(WriteableDataError::Other { description: "Number of elements times base_length exceeds usize::MAX" })?;
+            .ok_or(WriteableDataError::generic_error_static::<Self>(offset, 0, "Number of elements times base_length exceeds usize::MAX"))?;
 
         tag_data.try_reserve(total_base_length)?;
 
@@ -202,7 +249,7 @@ impl WriteableData for Vec<u8> {
 
         let length = u32::try_from(self.len())
             .ok()
-            .ok_or(WriteableDataError::Other { description: "Maximum data size of 4 GiB reached/exceeded" })?;
+            .ok_or(WriteableDataError::generic_error_static::<Self>(offset, 0, "Maximum data size of 4 GiB reached/exceeded"))?;
 
         tag_data.try_reserve(length as usize)?;
 
@@ -233,14 +280,20 @@ impl WriteableData for String {
 
         let data = &tag_data[cursor_base..cursor_end];
         parse_utf16_string(data, parameters)
+            .map_err(|e| {
+                match e {
+                    WriteableDataError::Other { description } => WriteableDataError::generic_error_moo::<Self>(offset, cursor_base, description),
+                    n => n
+                }
+            })
     }
 
     fn write_tag_data<B: ByteOrder>(&self, tag_data: &mut Vec<u8>, offset: usize, parameters: Parameters) -> Result<(), WriteableDataError> {
-        let length_bytes = encode_utf16_null_terminated_string(self)
+        let length_bytes = crate::util::encode_utf16_null_terminated_string(self)
             .count()
             .checked_mul(size_of::<u16>())
             .and_then(|v| u32::try_from(v).ok())
-            .ok_or(WriteableDataError::Other { description: "Maximum string size reached/exceeded 4 GiB when encoded into UTF-16" })?;
+            .ok_or(WriteableDataError::generic_error_static::<Self>(offset, 0, "Maximum string size reached/exceeded 4 GiB when encoded into UTF-16"))?;
 
         tag_data.try_reserve(length_bytes as usize)?;
 
@@ -250,10 +303,10 @@ impl WriteableData for String {
         }.write_tag_data::<B>(tag_data, offset, parameters)?;
 
         let mut null_byte_added = false;
-        for b in encode_utf16_null_terminated_string(self) {
+        for b in crate::util::encode_utf16_null_terminated_string(self) {
             if null_byte_added {
                 // TODO: On relaxed mode, we can probably just cut the string off here
-                return Err(WriteableDataError::Other { description: "Invalid string data (interior null bytes detected)" });
+                return Err(WriteableDataError::generic_error_static::<Self>(offset, 0, "Invalid string data (interior null bytes detected)"));
             }
             if b == 0 {
                 null_byte_added = true;
@@ -272,17 +325,17 @@ impl WriteableData for String {
 
 fn parse_utf16_string(data_with_null_terminator: &[u8], parameters: Parameters) -> Result<String, WriteableDataError> {
     if !data_with_null_terminator.len().is_multiple_of(2) {
-        return Err(WriteableDataError::Other { description: "UTF-16 string has improper length" })
+        return Err(WriteableDataError::Other { description: Cow::Borrowed("UTF-16 string has improper length") })
     }
     if data_with_null_terminator.is_empty() {
-        return Err(WriteableDataError::Other { description: "UTF-16 string has no data (thus is not null-terminated)" })
+        return Err(WriteableDataError::Other { description: Cow::Borrowed("UTF-16 string has no data (thus is not null-terminated)") })
     }
 
     let (data, null_terminator) = data_with_null_terminator.split_at(data_with_null_terminator.len() - 2);
     if null_terminator != [0,0] && parameters.strictness > Strictness::Relaxed {
         // On the game, this null terminator will be nulled out at runtime anyway, but such tags
         // are quite dangerous.
-        return Err(WriteableDataError::Other { description: "UTF-16 string is not null terminated" })
+        return Err(WriteableDataError::Other { description: Cow::Borrowed("UTF-16 string is not null terminated") })
     };
 
     if data.is_empty() {
@@ -302,11 +355,11 @@ fn parse_utf16_string(data_with_null_terminator: &[u8], parameters: Parameters) 
 
     for c in char::decode_utf16(wchar_iterator()) {
         let Ok(c) = c else {
-            return Err(WriteableDataError::Other { description: "Invalid UTF-16" });
+            return Err(WriteableDataError::Other { description: Cow::Borrowed("Invalid UTF-16") });
         };
         if null_terminator_encountered {
             if parameters.strictness > Strictness::Relaxed {
-                return Err(WriteableDataError::Other { description: "Interior null byte detected" });
+                return Err(WriteableDataError::Other { description: Cow::Borrowed("Interior null byte detected") });
             }
             break;
         }
@@ -329,24 +382,20 @@ fn parse_utf16_string(data_with_null_terminator: &[u8], parameters: Parameters) 
     Ok(string)
 }
 
-fn encode_utf16_null_terminated_string(string: &str) -> impl Iterator<Item = u16> {
-    string.encode_utf16().chain(once(0))
-}
-
 pub fn read_tag_file<T: MainTagStruct>(data: &[u8], parameters: Parameters) -> Result<T, WriteableDataError> {
     let header_size = TagFileHeader::length();
     if data.len() < header_size {
-        return Err(WriteableDataError::Other { description: "invalid tag file (no header)" })
+        return Err(WriteableDataError::Other { description: Cow::Borrowed("invalid tag file (no header)") })
     };
 
     let mut cursor = header_size;
     let header = TagFileHeader::read_tag_data::<byteorder::BigEndian>(data, 0x0, &mut cursor, parameters)?;
     let group = T::tag_group();
     if header.tag_group != group {
-        return Err(WriteableDataError::Other { description: "invalid tag file (wrong group)" })
+        return Err(WriteableDataError::Other { description: Cow::Borrowed("invalid tag file (wrong group)") })
     }
     if header.version != group.version() {
-        return Err(WriteableDataError::Other { description: "invalid tag file (wrong version for tag group)" })
+        return Err(WriteableDataError::Other { description: Cow::Borrowed("invalid tag file (wrong version for tag group)") })
     }
 
     // should not have changed
@@ -358,13 +407,13 @@ pub fn read_tag_file<T: MainTagStruct>(data: &[u8], parameters: Parameters) -> R
 
     if parameters.strictness > Strictness::Relaxed {
         if header.tag_data_offset as usize != base_offset {
-            return Err(WriteableDataError::Other { description: "invalid tag file (bad tag data offset)" })
+            return Err(WriteableDataError::Other { description: Cow::Borrowed("invalid tag file (bad tag data offset)") })
         }
 
         let mut crc = CRC32::new();
         crc.update(&data[base_offset..]);
         if crc.crc() != header.crc32 {
-            return Err(WriteableDataError::Other { description: "invalid tag file (wrong CRC32 - tag is corrupted)" })
+            return Err(WriteableDataError::Other { description: Cow::Borrowed("invalid tag file (wrong CRC32 - tag is corrupted)") })
         }
     }
 
