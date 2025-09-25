@@ -207,6 +207,52 @@ fn generate_enum(q: &mut String, e: &Enum) {
     *q += "(*self as u16).write_tag_data_simple::<B>(to, parameters);\n";
     *q += "}\n";
     *q += "}\n";
+
+    write(q, format_args!("impl EditableTagField for {name} {{\n")).unwrap();
+    *q += "fn get_enum(&self) -> Option<&dyn EditableEnumTagField> { Some(self) }\n";
+    *q += "fn get_enum_mut(&mut self) -> Option<&mut dyn EditableEnumTagField> { Some(self) }\n";
+    *q += "}\n";
+
+    write(q, format_args!("impl EditableEnumTagField for {name} {{\n")).unwrap();
+
+    let mut get_value = String::with_capacity(1024 * 64);
+    let mut set_value = String::with_capacity(1024 * 64);
+
+    *q += "#[inline]\n";
+    *q += "fn values(&self) -> &'static [&'static str] { &[\n";
+
+    for i in &e.options {
+        if i.flags.exclude {
+            continue
+        }
+
+        let name = &i.name_rust_enum;
+        let mut name_without_underscore = i.name_rust_field.clone();
+        while name_without_underscore.starts_with("_") {
+            name_without_underscore.remove(0);
+        }
+
+        write(q, format_args!("\"{name_without_underscore}\",\n")).unwrap();
+        write(&mut get_value, format_args!("Self::{name} => \"{name_without_underscore}\",")).unwrap();
+        write(&mut set_value, format_args!("\"{name_without_underscore}\" => {{ *self = Self::{name} }},")).unwrap();
+    }
+
+    *q += "] }\n";
+
+    *q += "fn get_value(&self) -> &'static str {\n";
+    *q += "match self {\n";
+    *q += &get_value;
+    *q += "}\n";
+    *q += "}\n";
+
+    *q += "fn set_value(&mut self, value: &str) -> Result<(), &'static str> {\n";
+    *q += "match value {\n";
+    *q += &set_value;
+    *q += "_ => return Err(\"unknown value\")\n";
+    *q += "}\n";
+    *q += "Ok(())\n";
+    *q += "}\n";
+    *q += "}\n";
 }
 
 fn generate_bitfield(q: &mut String, b: &Bitfield) {
@@ -272,6 +318,49 @@ fn generate_bitfield(q: &mut String, b: &Bitfield) {
 
     *q += "raw_data.write_tag_data_simple::<B>(to, parameters)\n";
     *q += "}\n";
+    *q += "}\n";
+    write(q, format_args!("impl EditableTagField for {name} {{")).unwrap();
+    *q += "#[inline] fn get_composite(&self) -> Option<&dyn EditableCompositeTagField> { Some(self) }\n";
+    *q += "#[inline] fn get_composite_mut(&mut self) -> Option<&mut dyn EditableCompositeTagField> { Some(self) }\n";
+    *q += "}\n";
+
+    let mut get_field = String::with_capacity(1024 * 64);
+    let mut get_field_mut = String::with_capacity(1024 * 64);
+
+    write(q, format_args!("impl EditableCompositeTagField for {name} {{")).unwrap();
+    *q += "#[inline]\n";
+    *q += "fn fields(&self) -> &'static [&'static str] { &[\n";
+    for f in &b.fields {
+        if f.flags.exclude {
+            continue
+        }
+
+        let name = &f.name_rust_field;
+        let mut name_without_preceding_underscore = f.name_rust_field.clone();
+        while name_without_preceding_underscore.starts_with("_") {
+            name_without_preceding_underscore.remove(0);
+        }
+
+        write(q, format_args!("\"{name_without_preceding_underscore}\",")).unwrap();
+        write(&mut get_field, format_args!("\"{name_without_preceding_underscore}\" => Some(&self.{name}),\n")).unwrap();
+        write(&mut get_field_mut, format_args!("\"{name_without_preceding_underscore}\" => Some(&mut self.{name}),\n")).unwrap();
+    }
+    *q += "] }\n";
+
+    *q += "fn get_field(&self, field: &str) -> Option<&dyn EditableTagField> {\n";
+    *q += "match field {\n";
+    *q += &get_field;
+    *q += "_ => None\n";
+    *q += "}\n";
+    *q += "}\n";
+
+    *q += "fn get_field_mut(&mut self, field: &str) -> Option<&mut dyn EditableTagField> {\n";
+    *q += "match field {\n";
+    *q += &get_field_mut;
+    *q += "_ => None\n";
+    *q += "}\n";
+    *q += "}\n";
+
     *q += "}\n";
 }
 
@@ -494,16 +583,60 @@ fn generate_struct(q: &mut String, s: &Struct, definitions: &ParsedDefinitions) 
         *q += "}\n";
     }
 
+    write(q, format_args!("impl EditableTagField for {name} {{")).unwrap();
+    *q += "#[inline] fn get_composite(&self) -> Option<&dyn EditableCompositeTagField> { Some(self) }\n";
+    *q += "#[inline] fn get_composite_mut(&mut self) -> Option<&mut dyn EditableCompositeTagField> { Some(self) }\n";
+    *q += "}\n";
+
+    let mut get_field = String::with_capacity(1024 * 1024);
+    let mut get_field_mut = String::with_capacity(1024 * 1024);
+
+    write(q, format_args!("impl EditableCompositeTagField for {name} {{")).unwrap();
+    *q += "#[inline]\n";
+    *q += "fn fields(&self) -> &'static [&'static str] { &[\n";
+    for f in &s.fields {
+        if f.flags.exclude || !matches!(f.field_type, StructFieldType::Object(_)) {
+            continue
+        }
+
+        let name = &f.name_rust_field;
+        let mut name_without_preceding_underscore = f.name_rust_field.clone();
+        while name_without_preceding_underscore.starts_with("_") {
+            name_without_preceding_underscore.remove(0);
+        }
+
+        write(q, format_args!("\"{name_without_preceding_underscore}\",")).unwrap();
+        write(&mut get_field, format_args!("\"{name_without_preceding_underscore}\" => Some(&self.{name}),\n")).unwrap();
+        write(&mut get_field_mut, format_args!("\"{name_without_preceding_underscore}\" => Some(&mut self.{name}),\n")).unwrap();
+    }
+    *q += "] }\n";
+
+    *q += "fn get_field(&self, field: &str) -> Option<&dyn EditableTagField> {\n";
+    *q += "match field {\n";
+    *q += &get_field;
+    *q += "_ => None\n";
+    *q += "}\n";
+    *q += "}\n";
+
+    *q += "fn get_field_mut(&mut self, field: &str) -> Option<&mut dyn EditableTagField> {\n";
+    *q += "match field {\n";
+    *q += &get_field_mut;
+    *q += "_ => None\n";
+    *q += "}\n";
+    *q += "}\n";
+
+    *q += "}\n";
+
     for i in definitions.groups.values() {
         if &i.struct_name == name {
             write(q, format_args!("impl MainTagStruct for {name} {{")).unwrap();
             *q += "#[inline]\n";
             write(q, format_args!("fn tag_group() -> TagGroup {{ TagGroup::{} }}", i.name_rust_enum)).unwrap();
-            *q += "}";
+            *q += "}\n";
             write(q, format_args!("impl EditableTag for {name} {{")).unwrap();
             *q += "#[inline]\n";
             write(q, format_args!("fn tag_group(&self) -> TagGroup {{ TagGroup::{} }}", i.name_rust_enum)).unwrap();
-            *q += "}";
+            *q += "}\n";
             break
         }
     }

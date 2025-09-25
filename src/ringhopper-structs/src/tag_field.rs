@@ -7,7 +7,7 @@ use funnel_web::rectangle::Rectangle;
 use funnel_web::string::ASCIIString;
 use funnel_web::vector::*;
 use core::any::Any;
-use crate::{Address, Reflexive, TagReference, WriteableData};
+use crate::{Address, Bounds, Reflexive, ScenarioScriptNodeValue, TagReference, WriteableData};
 use crate::definitions::TagGroup;
 
 pub trait EditableTagField: 'static + Any {
@@ -29,6 +29,13 @@ pub trait EditableTagField: 'static + Any {
         None
     }
     fn get_field_data_mut(&mut self) -> Option<&mut dyn EditableTagFieldData> {
+        None
+    }
+
+    fn get_enum(&self) -> Option<&dyn EditableEnumTagField> {
+        None
+    }
+    fn get_enum_mut(&mut self) -> Option<&mut dyn EditableEnumTagField> {
         None
     }
 }
@@ -53,8 +60,13 @@ pub trait EditableIndexedTagField: EditableTagField {
     fn add_item(&mut self, at: usize) -> Result<(), &'static str>;
 }
 
-// TODO: This should implement EditableCompositeTagField
-pub trait EditableTag: Any {
+pub trait EditableEnumTagField: EditableTagField {
+    fn values(&self) -> &'static [&'static str];
+    fn get_value(&self) -> &'static str;
+    fn set_value(&mut self, value: &str) -> Result<(), &'static str>;
+}
+
+pub trait EditableTag: EditableCompositeTagField {
     fn tag_group(&self) -> TagGroup;
 }
 
@@ -122,6 +134,48 @@ impl<'a> Display for TagFieldDataValue<'a> {
         }
     }
 }
+
+impl EditableTagField for ScenarioScriptNodeValue {
+    fn get_field_data(&self) -> Option<&dyn EditableTagFieldData> {
+        Some(&self.0)
+    }
+    fn get_field_data_mut(&mut self) -> Option<&mut dyn EditableTagFieldData> {
+        Some(&mut self.0)
+    }
+}
+
+impl<T: EditableTagField> EditableTagField for Bounds<T> {
+    fn get_composite(&self) -> Option<&dyn EditableCompositeTagField> {
+        Some(self)
+    }
+    fn get_composite_mut(&mut self) -> Option<&mut dyn EditableCompositeTagField> {
+        Some(self)
+    }
+}
+
+impl<T: EditableTagField> EditableCompositeTagField for Bounds<T> {
+    fn fields(&self) -> &'static [&'static str] {
+        &["from", "to"]
+    }
+    fn get_field(&self, field: &str) -> Option<&dyn EditableTagField> {
+        match field {
+            "from" => Some(&self.from),
+            "to" => Some(&self.to),
+            _ => None
+        }
+    }
+    fn get_field_mut(&mut self, field: &str) -> Option<&mut dyn EditableTagField> {
+        match field {
+            "from" => Some(&mut self.from),
+            "to" => Some(&mut self.to),
+            _ => None
+        }
+    }
+}
+
+impl EditableTagField for TagGroup {}
+impl EditableTagField for alloc::string::String {}
+impl EditableTagField for alloc::vec::Vec<u8> {}
 
 impl EditableTagField for bool {
     #[inline]
@@ -412,6 +466,53 @@ impl EditableTagFieldData for Address {
     }
     fn set_value(&mut self, _value: &str) -> Result<(), &'static str> {
         unreachable!("addresses are read-only with this interface")
+    }
+}
+
+impl<T: EditableTagField, const LEN: usize> EditableTagField for [T; LEN] {
+    fn get_indexed(&self) -> Option<&dyn EditableIndexedTagField> {
+        Some(self)
+    }
+    fn get_indexed_mut(&mut self) -> Option<&mut dyn EditableIndexedTagField> {
+        Some(self)
+    }
+}
+
+impl<T: EditableTagField, const LEN: usize> EditableIndexedTagField for [T; LEN] {
+    #[inline]
+    fn item_count(&self) -> usize {
+        self.len()
+    }
+
+    #[inline]
+    fn get_item(&self, item: usize) -> Option<&dyn EditableTagField> {
+        Some(self.get(item)? as &dyn EditableTagField)
+    }
+
+    #[inline]
+    fn get_item_mut(&mut self, item: usize) -> Option<&mut dyn EditableTagField> {
+        Some(self.get_mut(item)? as &mut dyn EditableTagField)
+    }
+
+    #[inline]
+    fn remove_item(&mut self, _item: usize) -> Result<(), &'static str> {
+        Err("array is fixed length; cannot remove items")
+    }
+
+    #[inline]
+    fn swap_items(&mut self, a: usize, b: usize) -> Result<(), &'static str> {
+        if a.max(b) < self.len() {
+            self.swap(a, b);
+            Ok(())
+        }
+        else {
+            Err("out of bounds")
+        }
+    }
+
+    #[inline]
+    fn add_item(&mut self, _at: usize) -> Result<(), &'static str> {
+        Err("array is fixed length; cannot add items")
     }
 }
 
