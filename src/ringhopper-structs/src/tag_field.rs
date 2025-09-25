@@ -6,9 +6,10 @@ use funnel_web::id::{Index, ID};
 use funnel_web::rectangle::Rectangle;
 use funnel_web::string::ASCIIString;
 use funnel_web::vector::*;
+use core::any::Any;
 use crate::{Address, Reflexive, TagReference, WriteableData};
 
-pub trait EditableTagField: 'static + core::any::Any {
+pub trait EditableTagField: 'static + Any {
     fn get_composite(&self) -> Option<&dyn EditableCompositeTagField> {
         None
     }
@@ -49,6 +50,42 @@ pub trait EditableIndexedTagField: EditableTagField {
     fn remove_item(&mut self, item: usize) -> Result<(), &'static str>;
     fn swap_items(&mut self, a: usize, b: usize) -> Result<(), &'static str>;
     fn add_item(&mut self, at: usize) -> Result<(), &'static str>;
+}
+
+impl dyn EditableTagField {
+    pub fn downcast_ref<T: EditableTagField>(&self) -> Option<&T> {
+        <dyn Any>::downcast_ref(self as &dyn Any)
+    }
+    pub fn downcast_mut<T: EditableTagField>(&mut self) -> Option<&mut T> {
+        <dyn Any>::downcast_mut(self as &mut dyn Any)
+    }
+}
+
+impl dyn EditableTagFieldData {
+    pub fn downcast_ref<T: EditableTagFieldData>(&self) -> Option<&T> {
+        <dyn Any>::downcast_ref(self as &dyn Any)
+    }
+    pub fn downcast_mut<T: EditableTagFieldData>(&mut self) -> Option<&mut T> {
+        <dyn Any>::downcast_mut(self as &mut dyn Any)
+    }
+}
+
+impl dyn EditableCompositeTagField {
+    pub fn downcast_ref<T: EditableCompositeTagField>(&self) -> Option<&T> {
+        <dyn Any>::downcast_ref(self as &dyn Any)
+    }
+    pub fn downcast_mut<T: EditableCompositeTagField>(&mut self) -> Option<&mut T> {
+        <dyn Any>::downcast_mut(self as &mut dyn Any)
+    }
+}
+
+impl dyn EditableIndexedTagField {
+    pub fn downcast_ref<T: EditableIndexedTagField>(&self) -> Option<&T> {
+        <dyn Any>::downcast_ref(self as &dyn Any)
+    }
+    pub fn downcast_mut<T: EditableIndexedTagField>(&mut self) -> Option<&mut T> {
+        <dyn Any>::downcast_mut(self as &mut dyn Any)
+    }
 }
 
 #[derive(Copy, Clone, Debug, PartialEq)]
@@ -130,7 +167,6 @@ define_editable_tag_field_parseable!(u32, "can't parse into u32");
 define_editable_tag_field_parseable!(i8, "can't parse into i8");
 define_editable_tag_field_parseable!(i16, "can't parse into i16");
 define_editable_tag_field_parseable!(i32, "can't parse into i32");
-
 
 impl EditableTagField for f32 {
     #[inline]
@@ -434,6 +470,8 @@ mod test {
         }
 
         r_c.swap_items(22, 63).unwrap();
+
+        r_c.downcast_ref::<Reflexive<Vector3D>>().expect("should be able to be downcast back to Reflexive<Vector3D>");
 
         assert_eq!(r[63].x, 66.0);
         assert_eq!(r[63].y, 67.0);
