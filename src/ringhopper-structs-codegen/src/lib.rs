@@ -93,6 +93,19 @@ pub fn generate_tag_group_enum(_: TokenStream) -> TokenStream {
     q += "}\n";
     q += "}\n";
 
+
+    // str impl
+    q += "/// Load the tag data.\n";
+    q += "pub fn read_editable_tag(data: &[u8], parameters: Parameters) -> Result<alloc::boxed::Box<dyn EditableTag>, WriteableDataError> {\n";
+    q += "let header = tag::TagFileHeader::read_tag_data::<byteorder::BigEndian>(data, 0x0, &mut TagFileHeader::base_length(), parameters)?;\n";
+    q += "match header.tag_group {\n";
+    for group in definitions.groups.values() {
+        write(&mut q, format_args!("TagGroup::{name_enum}=>read_tag_file::<{struct_name}>(data, parameters).map(|t| alloc::boxed::Box::new(t) as alloc::boxed::Box<dyn EditableTag>),\n", name_enum = group.name_rust_enum, struct_name = group.struct_name)).unwrap();
+    }
+    q += "_ => Err(WriteableDataError::Other { description: alloc::borrow::Cow::Borrowed(\"no tag group\") }),\n";
+    q += "}\n";
+    q += "}\n";
+
     q.parse().expect("failed to parse generate_tag_group_enum result")
 }
 
@@ -486,6 +499,10 @@ fn generate_struct(q: &mut String, s: &Struct, definitions: &ParsedDefinitions) 
             write(q, format_args!("impl MainTagStruct for {name} {{")).unwrap();
             *q += "#[inline]\n";
             write(q, format_args!("fn tag_group() -> TagGroup {{ TagGroup::{} }}", i.name_rust_enum)).unwrap();
+            *q += "}";
+            write(q, format_args!("impl EditableTag for {name} {{")).unwrap();
+            *q += "#[inline]\n";
+            write(q, format_args!("fn tag_group(&self) -> TagGroup {{ TagGroup::{} }}", i.name_rust_enum)).unwrap();
             *q += "}";
             break
         }

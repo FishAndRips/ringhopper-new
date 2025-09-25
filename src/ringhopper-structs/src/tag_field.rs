@@ -8,6 +8,7 @@ use funnel_web::string::ASCIIString;
 use funnel_web::vector::*;
 use core::any::Any;
 use crate::{Address, Reflexive, TagReference, WriteableData};
+use crate::definitions::TagGroup;
 
 pub trait EditableTagField: 'static + Any {
     fn get_composite(&self) -> Option<&dyn EditableCompositeTagField> {
@@ -52,6 +53,11 @@ pub trait EditableIndexedTagField: EditableTagField {
     fn add_item(&mut self, at: usize) -> Result<(), &'static str>;
 }
 
+// TODO: This should implement EditableCompositeTagField
+pub trait EditableTag: Any {
+    fn tag_group(&self) -> TagGroup;
+}
+
 impl dyn EditableTagField {
     pub fn downcast_ref<T: EditableTagField>(&self) -> Option<&T> {
         <dyn Any>::downcast_ref(self as &dyn Any)
@@ -84,6 +90,15 @@ impl dyn EditableIndexedTagField {
         <dyn Any>::downcast_ref(self as &dyn Any)
     }
     pub fn downcast_mut<T: EditableIndexedTagField>(&mut self) -> Option<&mut T> {
+        <dyn Any>::downcast_mut(self as &mut dyn Any)
+    }
+}
+
+impl dyn EditableTag {
+    pub fn downcast_ref<T: EditableTag>(&self) -> Option<&T> {
+        <dyn Any>::downcast_ref(self as &dyn Any)
+    }
+    pub fn downcast_mut<T: EditableTag>(&mut self) -> Option<&mut T> {
         <dyn Any>::downcast_mut(self as &mut dyn Any)
     }
 }
