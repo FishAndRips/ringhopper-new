@@ -48,3 +48,25 @@ pub(crate) fn encode_utf8_null_terminated_string(string: &str) -> impl Iterator<
 pub(crate) fn encode_utf16_null_terminated_string(string: &str) -> impl Iterator<Item = u16> {
     string.encode_utf16().chain(once(0))
 }
+
+/// Change the reference's lifetime.
+///
+/// # Safety
+///
+/// Using this function will lead to regret.
+#[allow(unused)]
+pub(crate) unsafe fn launder_reference_lifetime<'a, T: ?Sized>(a: &'a T) -> &'static T {
+    // SAFETY: LOL
+    unsafe { &*(a as *const T) }
+}
+
+/// Change the reference's lifetime.
+///
+/// # Safety
+///
+/// Using this function will lead to regret.
+#[allow(unused)]
+pub(crate) unsafe fn launder_reference_lifetime_mut<'a, T: ?Sized>(a: &'a mut T) -> &'static mut T {
+    // SAFETY: LOL
+    unsafe { &mut *(a as *mut T) }
+}
