@@ -1,5 +1,3 @@
-//! TODO: This is not complete!
-
 use core::fmt::{Display, Formatter};
 use funnel_web::color::{ColorARGB, ColorRGB, Pixel32};
 use funnel_web::id::{Index, ID};
@@ -8,6 +6,7 @@ use funnel_web::string::ASCIIString;
 use funnel_web::vector::*;
 use core::any::Any;
 use core::ops::ControlFlow;
+use alloc::boxed::Box;
 use crate::{Address, Bounds, Reflexive, ScenarioScriptNodeValue, TagReference, WriteableData};
 use crate::definitions::TagGroup;
 use crate::util::{launder_reference_lifetime, launder_reference_lifetime_mut};
@@ -87,6 +86,7 @@ pub trait EditableEnumTagField: EditableTagField {
 
 pub trait EditableTag: EditableCompositeTagField {
     fn tag_group(&self) -> TagGroup;
+    fn clone_to_boxed_tag(&self) -> Box<dyn EditableTag>;
 }
 
 impl dyn EditableTagField {
@@ -155,24 +155,28 @@ impl<'a> Display for TagFieldDataValue<'a> {
 }
 
 impl EditableTagField for ScenarioScriptNodeValue {
+    #[inline]
     fn get_field_data(&self) -> Option<&dyn EditableTagFieldData> {
         Some(&self.0)
     }
+    #[inline]
     fn get_field_data_mut(&mut self) -> Option<&mut dyn EditableTagFieldData> {
         Some(&mut self.0)
     }
 }
 
-impl<T: EditableTagField> EditableTagField for Bounds<T> {
+impl<T: EditableTagField + Clone> EditableTagField for Bounds<T> {
+    #[inline]
     fn get_composite(&self) -> Option<&dyn EditableCompositeTagField> {
         Some(self)
     }
+    #[inline]
     fn get_composite_mut(&mut self) -> Option<&mut dyn EditableCompositeTagField> {
         Some(self)
     }
 }
 
-impl<T: EditableTagField> EditableCompositeTagField for Bounds<T> {
+impl<T: EditableTagField + Clone> EditableCompositeTagField for Bounds<T> {
     fn fields(&self) -> &'static [&'static str] {
         &["from", "to"]
     }
@@ -438,9 +442,11 @@ impl EditableTagField for CompressedVector3D {}
 
 impl EditableTagField for Pixel32 {}
 impl EditableTagField for Angle {
+    #[inline]
     fn get_field_data(&self) -> Option<&dyn EditableTagFieldData> {
         Some(self)
     }
+    #[inline]
     fn get_field_data_mut(&mut self) -> Option<&mut dyn EditableTagFieldData> {
         Some(self)
     }
@@ -479,9 +485,11 @@ impl EditableTagFieldData for Angle {
 }
 
 impl EditableTagField for Index {
+    #[inline]
     fn get_field_data(&self) -> Option<&dyn EditableTagFieldData> {
         Some(self)
     }
+    #[inline]
     fn get_field_data_mut(&mut self) -> Option<&mut dyn EditableTagFieldData> {
         Some(self)
     }
@@ -500,6 +508,7 @@ impl EditableTagFieldData for Index {
 }
 
 impl EditableTagField for Address {
+    #[inline]
     fn get_field_data(&self) -> Option<&dyn EditableTagFieldData> {
         Some(self)
     }
@@ -514,9 +523,11 @@ impl EditableTagFieldData for Address {
 }
 
 impl<T: EditableTagField, const LEN: usize> EditableTagField for [T; LEN] {
+    #[inline]
     fn get_indexed(&self) -> Option<&dyn EditableIndexedTagField> {
         Some(self)
     }
+    #[inline]
     fn get_indexed_mut(&mut self) -> Option<&mut dyn EditableIndexedTagField> {
         Some(self)
     }

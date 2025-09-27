@@ -10,6 +10,7 @@ use funnel_web::string::*;
 use funnel_web::id::*;
 use funnel_web::rectangle::*;
 use alloc::string::String;
+use alloc::boxed::Box;
 use byteorder::ByteOrder;
 
 ringhopper_structs_codegen::generate_tag_data_defs!();

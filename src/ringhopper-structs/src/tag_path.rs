@@ -103,7 +103,7 @@ const _: () = const {
 /// All uppercase characters are automatically converted into lowercase.
 ///
 /// Control characters (e.g. `NUL`, `\n`, etc.) are not allowed.
-#[derive(Clone, PartialEq)]
+#[derive(Clone, PartialEq, Ord, PartialOrd, Eq)]
 pub struct TagPath {
     path: String,
     group: TagGroup

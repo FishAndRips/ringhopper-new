@@ -12,7 +12,7 @@ pub fn generate_tag_group_enum(_: TokenStream) -> TokenStream {
     q += "/// Defines a type of tag.\n";
     q += "///\n";
     q += "/// Internally, this is represented as a 32-bit `u32` (a FourCC).\n";
-    q += "#[derive(Copy, Clone, PartialEq, Debug, Default)]\n";
+    q += "#[derive(Copy, Clone, PartialEq, Debug, Default, PartialOrd, Ord, Eq)]\n";
     q += "#[repr(u32)]\n";
 
     // the enum
@@ -209,8 +209,8 @@ fn generate_enum(q: &mut String, e: &Enum) {
     *q += "}\n";
 
     write(q, format_args!("impl EditableTagField for {name} {{\n")).unwrap();
-    *q += "fn get_enum(&self) -> Option<&dyn EditableEnumTagField> { Some(self) }\n";
-    *q += "fn get_enum_mut(&mut self) -> Option<&mut dyn EditableEnumTagField> { Some(self) }\n";
+    *q += "#[inline] fn get_enum(&self) -> Option<&dyn EditableEnumTagField> { Some(self) }\n";
+    *q += "#[inline] fn get_enum_mut(&mut self) -> Option<&mut dyn EditableEnumTagField> { Some(self) }\n";
     *q += "}\n";
 
     write(q, format_args!("impl EditableEnumTagField for {name} {{\n")).unwrap();
@@ -671,8 +671,8 @@ fn generate_struct(q: &mut String, s: &Struct, definitions: &ParsedDefinitions) 
             write(q, format_args!("fn tag_group() -> TagGroup {{ TagGroup::{} }}", i.name_rust_enum)).unwrap();
             *q += "}\n";
             write(q, format_args!("impl EditableTag for {name} {{")).unwrap();
-            *q += "#[inline]\n";
-            write(q, format_args!("fn tag_group(&self) -> TagGroup {{ TagGroup::{} }}", i.name_rust_enum)).unwrap();
+            write(q, format_args!("#[inline] fn tag_group(&self) -> TagGroup {{ TagGroup::{} }}", i.name_rust_enum)).unwrap();
+            *q += "#[inline] fn clone_to_boxed_tag(&self) -> Box<dyn EditableTag> { Box::new(self.clone()) }\n";
             *q += "}\n";
             break
         }

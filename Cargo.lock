@@ -75,6 +75,10 @@ dependencies = [
 [[package]]
 name = "ringhopper"
 version = "0.2.0"
+dependencies = [
+ "ringhopper-structs",
+ "spin",
+]
 
 [[package]]
 name = "ringhopper-definitions"

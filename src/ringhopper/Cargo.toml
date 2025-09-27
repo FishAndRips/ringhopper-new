@@ -5,6 +5,8 @@ license = "GPL-3.0-only"
 edition = "2024"
 
 [dependencies]
+ringhopper-structs = { path = "../ringhopper-structs" }
+spin = "0.10.0"
 
 [features]
 std = []
