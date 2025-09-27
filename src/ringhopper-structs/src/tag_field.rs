@@ -10,7 +10,7 @@ use core::any::Any;
 use core::ops::ControlFlow;
 use crate::{Address, Bounds, Reflexive, ScenarioScriptNodeValue, TagReference, WriteableData};
 use crate::definitions::TagGroup;
-use crate::util::launder_reference_lifetime_mut;
+use crate::util::{launder_reference_lifetime, launder_reference_lifetime_mut};
 
 pub trait EditableTagField: 'static + Any {
     fn get_composite(&self) -> Option<&dyn EditableCompositeTagField> {
@@ -563,13 +563,16 @@ impl<T: EditableTagField, const LEN: usize> EditableIndexedTagField for [T; LEN]
 #[derive(Copy, Clone, PartialEq, Debug)]
 pub enum GetFieldError<'a, E = ()> {
     InvalidSyntax { description: &'static str, what: &'a str },
+    BadAccess { description: &'static str, what: &'a str },
     NotFound { description: &'static str, what: &'a str },
     Break(E)
 }
 
-// TODO: Make a non-mutable version?
-pub fn iterate_fields_from_path<'a, 'b, E, F: FnMut(&'a mut dyn EditableTagField) -> ControlFlow<E, ()>>(field: &'a mut dyn EditableTagField, path: &'b str, mut function: F) -> Result<(), GetFieldError<'b, E>> {
-    fn iterate_fields_from_path<'a, 'b, E, F: FnMut(&'a mut dyn EditableTagField) -> ControlFlow<E, ()>>(field: &'a mut dyn EditableTagField, mut path: &'b str, function: &mut F) -> Result<(), GetFieldError<'b, E>> {
+macro_rules! make_field_iterator {
+    ($name:tt, $get_indexed:tt, $get_composite:tt, $get_field:tt, $get_item:tt, $typing:ty, $launder:tt) => {
+
+pub fn $name<'a, 'b, E, F: FnMut($typing) -> ControlFlow<E, ()>>(field: $typing, path: &'b str, mut function: F) -> Result<(), GetFieldError<'b, E>> {
+    fn inner<'a, 'b, E, F: FnMut($typing) -> ControlFlow<E, ()>>(field: $typing, mut path: &'b str, function: &mut F) -> Result<(), GetFieldError<'b, E>> {
         if path == "" {
             return match function(field) {
                 ControlFlow::Continue(()) => Ok(()),
@@ -579,8 +582,14 @@ pub fn iterate_fields_from_path<'a, 'b, E, F: FnMut(&'a mut dyn EditableTagField
 
         // Allow [1, 1..2, 1..=2, *, ..]
         if path.starts_with("[") {
-            let Some(indexable) = field.get_indexed_mut() else {
-                return Err(GetFieldError::InvalidSyntax { description: "trying to index something non-indexable", what: path })
+            let index_read_only_exists = field.get_indexed().is_some();
+            let Some(indexable) = field.$get_indexed() else {
+                if index_read_only_exists {
+                    return Err(GetFieldError::BadAccess { description: "cannot index field: field cannot be written to", what: path });
+                }
+                else {
+                    return Err(GetFieldError::BadAccess { description: "trying to index something non-indexable", what: path });
+                }
             };
             let Some(other_bracket) = path.find("]") else {
                 return Err(GetFieldError::InvalidSyntax { description: "no ] to match a [", what: path })
@@ -599,10 +608,10 @@ pub fn iterate_fields_from_path<'a, 'b, E, F: FnMut(&'a mut dyn EditableTagField
                 // Technically ".." also means everything, though the second branch will catch this.
                 if sub_index == "*" {
                     for i in 0..count {
-                        let item = unsafe { launder_reference_lifetime_mut(indexable) }
-                            .get_item_mut(i)
+                        let item = unsafe { $launder(indexable) }
+                            .$get_item(i)
                             .expect("failed to get item from index (wildcard); this is a bug");
-                        iterate_fields_from_path(item, remaining_path, function)?;
+                        inner(item, remaining_path, function)?;
                     }
                 }
                 else if let Some(dot_dot) = sub_index.find("..") {
@@ -640,21 +649,21 @@ pub fn iterate_fields_from_path<'a, 'b, E, F: FnMut(&'a mut dyn EditableTagField
                     }
 
                     for i in from..to {
-                        let item = unsafe { launder_reference_lifetime_mut(indexable) }
-                            .get_item_mut(i)
+                        let item = unsafe { $launder(indexable) }
+                            .$get_item(i)
                             .expect("failed to get item from index (from-to); this is a bug");
-                        iterate_fields_from_path(item, remaining_path, function)?;
+                        inner(item, remaining_path, function)?;
                     }
                 }
                 else {
                     let index: usize = sub_index
                         .parse()
                         .map_err(|_| GetFieldError::NotFound { description: "invalid index", what: sub_index })?;
-                    let Some(item) = unsafe { launder_reference_lifetime_mut(indexable) }
-                        .get_item_mut(index) else {
+                    let Some(item) = unsafe { $launder(indexable) }
+                        .$get_item(index) else {
                         return Err(GetFieldError::NotFound { description: "out-of-bounds index", what: sub_index })
                     };
-                    iterate_fields_from_path(item, remaining_path, function)?;
+                    inner(item, remaining_path, function)?;
                 }
             }
             return Ok(())
@@ -669,23 +678,34 @@ pub fn iterate_fields_from_path<'a, 'b, E, F: FnMut(&'a mut dyn EditableTagField
 
         let next = path.find(&['.', '[']).unwrap_or(path.len());
         let (member_name, remainder) = path.split_at(next);
-        let Some(f) = field.get_composite_mut() else {
-            return Err(GetFieldError::InvalidSyntax { description: "can't access member of non-mutably composite field", what: member_name });
+        let is_composite_read_only = field.get_composite().is_some();
+        let Some(f) = field.$get_composite() else {
+            if is_composite_read_only {
+                return Err(GetFieldError::BadAccess { description: "member field cannot be accessed: field cannot be written to", what: member_name });
+            }
+            else {
+                return Err(GetFieldError::BadAccess { description: "member field cannot be accessed: tried to access a field with no members", what: member_name });
+            }
         };
-        let Some(subfield) = f.get_field_mut(member_name) else {
-            return Err(GetFieldError::NotFound { description: "member field not found", what: member_name });
+        let Some(subfield) = f.$get_field(member_name) else {
+            return Err(GetFieldError::NotFound { description: "member field not found: this field does not have this member", what: member_name });
         };
 
-        iterate_fields_from_path(subfield, remainder, function)
+        inner(subfield, remainder, function)
     }
 
-    iterate_fields_from_path(field, path, &mut function)
+    inner(field, path, &mut function)
 }
+    };
+}
+
+make_field_iterator!(iterate_fields_from_path, get_indexed, get_composite, get_field, get_item, &'a dyn EditableTagField, launder_reference_lifetime);
+make_field_iterator!(iterate_fields_from_path_mut, get_indexed_mut, get_composite_mut, get_field_mut, get_item_mut, &'a mut dyn EditableTagField, launder_reference_lifetime_mut);
 
 #[cfg(test)]
 mod test {
     use funnel_web::string::String32;
-    use crate::{iterate_fields_from_path, EditableTagField, Reflexive};
+    use crate::{iterate_fields_from_path_mut, EditableTagField, Reflexive};
     use alloc::string::ToString;
     use core::ops::ControlFlow;
     use funnel_web::vector::Vector3D;
@@ -773,7 +793,7 @@ mod test {
     fn iterate_fields_from_path_test() {
         let mut biped = Biped::default();
 
-        iterate_fields_from_path(&mut biped, ".flags.can_climb_any_surface", |f| {
+        iterate_fields_from_path_mut(&mut biped, ".flags.can_climb_any_surface", |f| {
             f.get_field_data_mut().unwrap().set_value("true").unwrap();
             ControlFlow::Continue::<()>(())
         }).unwrap();
@@ -782,12 +802,12 @@ mod test {
 
         biped.unit.seats.push(UnitSeat::default());
 
-        iterate_fields_from_path(&mut biped, ".unit.seats[0].flags.invisible", |f| {
+        iterate_fields_from_path_mut(&mut biped, ".unit.seats[0].flags.invisible", |f| {
             f.get_field_data_mut().unwrap().set_value("true").unwrap();
             ControlFlow::Continue::<()>(())
         }).unwrap();
 
-        iterate_fields_from_path(&mut biped, ".unit.seats[0].acceleration_scale.z", |f| {
+        iterate_fields_from_path_mut(&mut biped, ".unit.seats[0].acceleration_scale.z", |f| {
             f.get_field_data_mut().unwrap().set_value("1337").unwrap();
             ControlFlow::Continue::<()>(())
         }).unwrap();
@@ -795,7 +815,7 @@ mod test {
         assert!(biped.unit.seats[0].flags.invisible);
         assert_eq!(biped.unit.seats[0].acceleration_scale.z, 1337.0);
 
-        iterate_fields_from_path(&mut biped, ".unit.seats[0].acceleration_scale", |f| {
+        iterate_fields_from_path_mut(&mut biped, ".unit.seats[0].acceleration_scale", |f| {
             *f.downcast_mut::<Vector3D>().unwrap() = Vector3D {
                 x: 0.0,
                 y: 1.0,
