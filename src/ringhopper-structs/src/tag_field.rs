@@ -49,6 +49,23 @@ pub trait EditableCompositeTagField: EditableTagField {
     fn fields(&self) -> &'static [&'static str];
     fn get_field(&self, field: &str) -> Option<&dyn EditableTagField>;
     fn get_field_mut(&mut self, field: &str) -> Option<&mut dyn EditableTagField>;
+    fn get_field_flags(&self, field: &str) -> Option<EditableTagSubfieldFlags>;
+}
+
+#[derive(Copy, Clone, Debug)]
+pub struct EditableTagSubfieldFlags {
+    /// Name of the field.
+    pub display_name: &'static str,
+
+    /// Determines readability.
+    ///
+    /// If `true`, this (and its descendents) are read only.
+    ///
+    /// Note that read-only is mainly an editor hint and does not prevent mutability.
+    pub read_only: bool,
+
+    /// Allowed references (if a TagReference).
+    pub allowed_references: &'static [TagGroup]
 }
 
 pub trait EditableIndexedTagField: EditableTagField {
@@ -168,6 +185,21 @@ impl<T: EditableTagField> EditableCompositeTagField for Bounds<T> {
         match field {
             "from" => Some(&mut self.from),
             "to" => Some(&mut self.to),
+            _ => None
+        }
+    }
+    fn get_field_flags(&self, field: &str) -> Option<EditableTagSubfieldFlags> {
+        match field {
+            "from" => Some(EditableTagSubfieldFlags {
+                display_name: "from",
+                read_only: false,
+                allowed_references: &[]
+            }),
+            "to" => Some(EditableTagSubfieldFlags {
+                display_name: "to",
+                read_only: false,
+                allowed_references: &[]
+            }),
             _ => None
         }
     }
@@ -315,6 +347,16 @@ macro_rules! composite_tag_fields {
             fn get_field_mut(&mut self, field: &str) -> Option<&mut dyn EditableTagField> {
                 match field {
                     $(stringify!($vals) => Some(&mut self.$vals),)*
+                    _ => None
+                }
+            }
+            fn get_field_flags(&self, field: &str) -> Option<EditableTagSubfieldFlags> {
+                match field {
+                    $(stringify!($vals) => Some(EditableTagSubfieldFlags {
+                        display_name: stringify!($vals),
+                        read_only: false,
+                        allowed_references: &[]
+                    }),)*
                     _ => None
                 }
             }

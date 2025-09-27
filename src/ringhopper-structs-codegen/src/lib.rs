@@ -326,6 +326,7 @@ fn generate_bitfield(q: &mut String, b: &Bitfield) {
 
     let mut get_field = String::with_capacity(1024 * 64);
     let mut get_field_mut = String::with_capacity(1024 * 64);
+    let mut get_field_flags = String::with_capacity(1024 * 1024);
 
     write(q, format_args!("impl EditableCompositeTagField for {name} {{")).unwrap();
     *q += "#[inline]\n";
@@ -344,6 +345,10 @@ fn generate_bitfield(q: &mut String, b: &Bitfield) {
         write(q, format_args!("\"{name_without_preceding_underscore}\",")).unwrap();
         write(&mut get_field, format_args!("\"{name_without_preceding_underscore}\" => Some(&self.{name}),\n")).unwrap();
         write(&mut get_field_mut, format_args!("\"{name_without_preceding_underscore}\" => Some(&mut self.{name}),\n")).unwrap();
+
+        let display_name = &f.name;
+        let read_only = f.flags.uneditable_in_editor;
+        write(&mut get_field_flags, format_args!("\"{name_without_preceding_underscore}\" => Some(EditableTagSubfieldFlags {{ display_name: \"{display_name}\", read_only: {read_only}, allowed_references: &[] }}),\n")).unwrap();
     }
     *q += "] }\n";
 
@@ -357,6 +362,13 @@ fn generate_bitfield(q: &mut String, b: &Bitfield) {
     *q += "fn get_field_mut(&mut self, field: &str) -> Option<&mut dyn EditableTagField> {\n";
     *q += "match field {\n";
     *q += &get_field_mut;
+    *q += "_ => None\n";
+    *q += "}\n";
+    *q += "}\n";
+
+    *q += "fn get_field_flags(&self, field: &str) -> Option<EditableTagSubfieldFlags> {\n";
+    *q += "match field {\n";
+    *q += &get_field_flags;
     *q += "_ => None\n";
     *q += "}\n";
     *q += "}\n";
@@ -590,14 +602,19 @@ fn generate_struct(q: &mut String, s: &Struct, definitions: &ParsedDefinitions) 
 
     let mut get_field = String::with_capacity(1024 * 1024);
     let mut get_field_mut = String::with_capacity(1024 * 1024);
+    let mut get_field_flags = String::with_capacity(1024 * 1024);
 
     write(q, format_args!("impl EditableCompositeTagField for {name} {{")).unwrap();
     *q += "#[inline]\n";
     *q += "fn fields(&self) -> &'static [&'static str] { &[\n";
     for f in &s.fields {
-        if f.flags.exclude || !matches!(f.field_type, StructFieldType::Object(_)) {
+        if f.flags.exclude  {
             continue
         }
+
+        let StructFieldType::Object(field_object) = &f.field_type else {
+            continue
+        };
 
         let name = &f.name_rust_field;
         let mut name_without_preceding_underscore = f.name_rust_field.clone();
@@ -605,9 +622,22 @@ fn generate_struct(q: &mut String, s: &Struct, definitions: &ParsedDefinitions) 
             name_without_preceding_underscore.remove(0);
         }
 
+        let mut allowed_references = String::with_capacity(1024 * 1024);
+        if let FieldObject::TagReference { allowed_groups } = &field_object {
+            for i in allowed_groups {
+                allowed_references += "TagGroup::";
+                allowed_references += &definitions.groups.get(i).unwrap().name_rust_enum;
+                allowed_references += ",";
+            }
+        }
+
         write(q, format_args!("\"{name_without_preceding_underscore}\",")).unwrap();
         write(&mut get_field, format_args!("\"{name_without_preceding_underscore}\" => Some(&self.{name}),\n")).unwrap();
         write(&mut get_field_mut, format_args!("\"{name_without_preceding_underscore}\" => Some(&mut self.{name}),\n")).unwrap();
+
+        let display_name = &f.name;
+        let read_only = f.flags.uneditable_in_editor;
+        write(&mut get_field_flags, format_args!("\"{name_without_preceding_underscore}\" => Some(EditableTagSubfieldFlags {{ display_name: \"{display_name}\", read_only: {read_only}, allowed_references: &[{allowed_references}] }}),\n")).unwrap();
     }
     *q += "] }\n";
 
@@ -621,6 +651,13 @@ fn generate_struct(q: &mut String, s: &Struct, definitions: &ParsedDefinitions) 
     *q += "fn get_field_mut(&mut self, field: &str) -> Option<&mut dyn EditableTagField> {\n";
     *q += "match field {\n";
     *q += &get_field_mut;
+    *q += "_ => None\n";
+    *q += "}\n";
+    *q += "}\n";
+
+    *q += "fn get_field_flags(&self, field: &str) -> Option<EditableTagSubfieldFlags> {\n";
+    *q += "match field {\n";
+    *q += &get_field_flags;
     *q += "_ => None\n";
     *q += "}\n";
     *q += "}\n";
