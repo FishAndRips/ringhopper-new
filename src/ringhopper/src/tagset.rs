@@ -5,6 +5,7 @@ mod cache;
 mod cow;
 #[cfg(any(feature = "std", feature = "minxp"))]
 mod filesystem;
+mod cache_file;
 
 use alloc::boxed::Box;
 use ringhopper_structs::{EditableTag, Parameters, TagPath};

@@ -8,20 +8,25 @@ pub struct MultiTagset<T: Tagset> {
 }
 
 impl<T: Tagset> MultiTagset<T> {
+    #[inline]
     pub const fn new(sets: Vec<T>) -> Self {
         Self {
             sets
         }
     }
+    #[inline]
     pub const fn get_sets(&self) -> &[T] {
         self.sets.as_slice()
     }
+    #[inline]
     pub const fn get_sets_mut(&mut self) -> &mut [T] {
         self.sets.as_mut_slice()
     }
+    #[inline]
     pub const fn get_sets_vec_mut(&mut self) -> &mut Vec<T> {
         &mut self.sets
     }
+    #[inline]
     pub fn write_tag_to_set(&mut self, tag_path: &TagPath, tag: &dyn EditableTag, set: usize, parameters: Parameters) -> Result<(), WriteTagError> {
         self.sets.get_mut(set).expect("set out-of-bounds").write_tag(tag_path, tag, parameters)
     }
@@ -38,6 +43,7 @@ impl<T: Tagset> Tagset for MultiTagset<T> {
         }
         Err(ReadTagError::NotFound)
     }
+    
     fn write_tag(&mut self, tag_path: &TagPath, tag: &dyn EditableTag, parameters: Parameters) -> Result<(), WriteTagError> {
         for i in self.sets.iter_mut().rev() {
             if i.has_tag(tag_path) {
@@ -49,6 +55,8 @@ impl<T: Tagset> Tagset for MultiTagset<T> {
             .expect("no tags directory")
             .write_tag(tag_path, tag, parameters)
     }
+
+    #[inline]
     fn has_tag(&self, tag_path: &TagPath) -> bool {
         for i in self.sets.iter() {
             if i.has_tag(tag_path) {
@@ -57,6 +65,8 @@ impl<T: Tagset> Tagset for MultiTagset<T> {
         }
         false
     }
+
+    #[inline]
     fn is_writeable(&self) -> bool {
         self.sets.iter().any(|i| i.is_writeable())
     }

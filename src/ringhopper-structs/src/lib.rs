@@ -15,6 +15,7 @@ mod bounds;
 mod scenario_script_node;
 mod reflexive;
 mod tag_field;
+mod cache_io;
 
 pub use tag_path::*;
 pub use simple_io::*;
@@ -24,5 +25,5 @@ pub use scenario_script_node::*;
 pub use tag_io::*;
 pub use reflexive::*;
 pub use tag_field::*;
-
+pub use cache_io::*;
 pub mod definitions;

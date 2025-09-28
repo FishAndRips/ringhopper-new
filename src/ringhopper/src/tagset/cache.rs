@@ -42,6 +42,7 @@ impl InnerCache {
 
 impl<T: Tagset> CachingTagset<T> {
     /// Instantiate a new caching tag set.
+    #[inline]
     pub const fn new(delegate: T, behavior: CacheBehavior) -> Self {
         Self {
             delegate, behavior, cache: RwLock::new(InnerCache { tag_cache: BTreeMap::new(), edited_tags: BTreeMap::new() })
@@ -96,6 +97,7 @@ impl<T: Tagset> CachingTagset<T> {
     }
 
     /// Clear the cache, including writes.
+    #[inline]
     pub fn reset(&self) {
         let mut cache = self.cache.write();
         cache.tag_cache.clear();
@@ -103,6 +105,7 @@ impl<T: Tagset> CachingTagset<T> {
     }
 
     /// Get the internal cache entry.
+    #[inline]
     pub fn get_direct(&self, tag_path: &TagPath) -> Option<Arc<Mutex<Box<dyn EditableTag>>>> {
         self.cache.read().tag_cache.get(tag_path).cloned()
     }
@@ -132,6 +135,7 @@ impl<T: Tagset> CachingTagset<T> {
 }
 
 impl<T: Tagset> Tagset for CachingTagset<T> {
+    #[inline]
     fn read_tag(&self, tag_path: &TagPath, parameters: Parameters) -> Result<Box<dyn EditableTag>, ReadTagError> {
         self.load_direct(tag_path, parameters).map(|t| t.lock().clone_to_boxed_tag())
     }
@@ -154,9 +158,11 @@ impl<T: Tagset> Tagset for CachingTagset<T> {
         cache.tag_cache.insert(tag_path.clone(), cloned);
         Ok(())
     }
+    #[inline]
     fn has_tag(&self, tag_path: &TagPath) -> bool {
         self.cache.read().tag_cache.contains_key(tag_path) || self.delegate.has_tag(tag_path)
     }
+    #[inline]
     fn is_writeable(&self) -> bool {
         self.delegate.is_writeable()
     }

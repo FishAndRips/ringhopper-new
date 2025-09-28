@@ -24,9 +24,12 @@ pub struct FilesystemTagset {
 }
 
 impl FilesystemTagset {
+    #[inline]
     pub const fn new(path: PathBuf) -> Self {
         Self { path }
     }
+
+    #[inline]
     pub fn tag_to_file_path(&self, tag: &TagPath) -> PathBuf {
         self.path.join(tag.path_display().to_string())
     }
@@ -60,10 +63,12 @@ impl Tagset for FilesystemTagset {
             .map_err(|e| WriteTagError::IOError { description: e.to_string() })
     }
 
+    #[inline]
     fn has_tag(&self, tag_path: &TagPath) -> bool {
         self.tag_to_file_path(tag_path).exists()
     }
 
+    #[inline]
     fn is_writeable(&self) -> bool {
         true
     }
