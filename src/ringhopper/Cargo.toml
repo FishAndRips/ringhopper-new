@@ -5,11 +5,12 @@ license = "GPL-3.0-only"
 edition = "2024"
 
 [dependencies]
-ringhopper-structs = { path = "../ringhopper-structs" }
+ringhopper-structs = { path = "../ringhopper-structs", default-features = false }
 spin = "0.10.0"
 
 [features]
-std = []
+std = ["ringhopper-structs/std"]
+default = []
 
 [lints]
 workspace = true

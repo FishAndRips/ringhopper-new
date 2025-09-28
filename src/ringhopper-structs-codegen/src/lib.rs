@@ -673,6 +673,7 @@ fn generate_struct(q: &mut String, s: &Struct, definitions: &ParsedDefinitions) 
             write(q, format_args!("impl EditableTag for {name} {{")).unwrap();
             write(q, format_args!("#[inline] fn tag_group(&self) -> TagGroup {{ TagGroup::{} }}", i.name_rust_enum)).unwrap();
             *q += "#[inline] fn clone_to_boxed_tag(&self) -> Box<dyn EditableTag> { Box::new(self.clone()) }\n";
+            *q += "#[inline] fn write_tag_to_vec(&self, parameters: Parameters) -> Result<Vec<u8>, WriteableDataError> { write_tag_file::<Self>(self, parameters) }\n";
             *q += "}\n";
             break
         }

@@ -6,17 +6,13 @@ use funnel_web::id::TagID;
 use alloc::string::String;
 use core::any::type_name;
 use funnel_web::crc::CRC32;
-use crate::{Address, EditableCompositeTagField, Parameters, Reflexive, SimpleWriteableData, Strictness, TagPath, TagReference, MAX_PATH_LEN};
+use crate::{Address, Parameters, Reflexive, SimpleWriteableData, Strictness, TagPath, TagReference, MAX_PATH_LEN};
 use crate::definitions::tag::TagFileHeader;
 use crate::definitions::TagGroup;
 use crate::simple_io::{ReflexiveC, TagDataC, TagReferenceC};
 
 pub trait MainTagStruct: WriteableData {
     fn tag_group() -> TagGroup;
-}
-
-pub trait MainTagStructDyn: EditableCompositeTagField {
-    fn tag_group(&self) -> TagGroup;
 }
 
 pub trait WriteableData: Sized {

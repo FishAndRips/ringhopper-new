@@ -244,7 +244,7 @@ impl TagPath {
                 while let Some(q) = components.next() {
                     f.write_str(q)?;
                     if components.peek().is_some() {
-                        f.write_char(main_separator)?;
+                        core::fmt::Write::write_char(f, main_separator)?;
                     }
                 }
 

@@ -1,42 +1,53 @@
 use alloc::vec::Vec;
 use alloc::boxed::Box;
-use ringhopper_structs::{EditableTag, TagPath};
-use super::TagSet;
+use ringhopper_structs::{EditableTag, Parameters, TagPath};
+use super::{ReadTagError, Tagset, WriteTagError};
 
-pub struct MultiTagSet<T: TagSet> {
+pub struct MultiTagset<T: Tagset> {
     sets: Vec<T>
 }
 
-impl<T: TagSet> MultiTagSet<T> {
+impl<T: Tagset> MultiTagset<T> {
     pub const fn new(sets: Vec<T>) -> Self {
         Self {
             sets
         }
     }
-    pub fn write_tag_to_set(&self, tag_path: &TagPath, tag: &dyn EditableTag, set: usize) {
-        self.sets.get(set).expect("set out-of-bounds").write_tag(tag_path, tag)
+    pub const fn get_sets(&self) -> &[T] {
+        self.sets.as_slice()
+    }
+    pub const fn get_sets_mut(&mut self) -> &mut [T] {
+        self.sets.as_mut_slice()
+    }
+    pub const fn get_sets_vec_mut(&mut self) -> &mut Vec<T> {
+        &mut self.sets
+    }
+    pub fn write_tag_to_set(&mut self, tag_path: &TagPath, tag: &dyn EditableTag, set: usize, parameters: Parameters) -> Result<(), WriteTagError> {
+        self.sets.get_mut(set).expect("set out-of-bounds").write_tag(tag_path, tag, parameters)
     }
 }
 
-impl<T: TagSet> TagSet for MultiTagSet<T> {
-    fn read_tag(&self, tag_path: &TagPath) -> Option<Box<dyn EditableTag>> {
+impl<T: Tagset> Tagset for MultiTagset<T> {
+    fn read_tag(&self, tag_path: &TagPath, parameters: Parameters) -> Result<Box<dyn EditableTag>, ReadTagError> {
         for i in self.sets.iter().rev() {
-            if let Some(t) = i.read_tag(tag_path) {
-                return Some(t)
+            match i.read_tag(tag_path, parameters) {
+                Ok(n) => return Ok(n),
+                Err(ReadTagError::NotFound) => continue,
+                Err(e) => return Err(e)
             }
         }
-        None
+        Err(ReadTagError::NotFound)
     }
-    fn write_tag(&self, tag_path: &TagPath, tag: &dyn EditableTag) {
-        for i in self.sets.iter().rev() {
+    fn write_tag(&mut self, tag_path: &TagPath, tag: &dyn EditableTag, parameters: Parameters) -> Result<(), WriteTagError> {
+        for i in self.sets.iter_mut().rev() {
             if i.has_tag(tag_path) {
-                return i.write_tag(tag_path, tag);
+                return i.write_tag(tag_path, tag, parameters);
             }
         }
         self.sets
-            .first()
+            .first_mut()
             .expect("no tags directory")
-            .write_tag(tag_path, tag)
+            .write_tag(tag_path, tag, parameters)
     }
     fn has_tag(&self, tag_path: &TagPath) -> bool {
         for i in self.sets.iter() {
@@ -45,5 +56,8 @@ impl<T: TagSet> TagSet for MultiTagSet<T> {
             }
         }
         false
+    }
+    fn is_writeable(&self) -> bool {
+        self.sets.iter().any(|i| i.is_writeable())
     }
 }

@@ -7,7 +7,8 @@ use funnel_web::vector::*;
 use core::any::Any;
 use core::ops::ControlFlow;
 use alloc::boxed::Box;
-use crate::{Address, Bounds, Reflexive, ScenarioScriptNodeValue, TagReference, WriteableData};
+use alloc::vec::Vec;
+use crate::{Address, Bounds, Parameters, Reflexive, ScenarioScriptNodeValue, TagReference, WriteableData, WriteableDataError};
 use crate::definitions::TagGroup;
 use crate::util::{launder_reference_lifetime, launder_reference_lifetime_mut};
 
@@ -87,6 +88,7 @@ pub trait EditableEnumTagField: EditableTagField {
 pub trait EditableTag: EditableCompositeTagField {
     fn tag_group(&self) -> TagGroup;
     fn clone_to_boxed_tag(&self) -> Box<dyn EditableTag>;
+    fn write_tag_to_vec(&self, parameters: Parameters) -> Result<Vec<u8>, WriteableDataError>;
 }
 
 impl dyn EditableTagField {
