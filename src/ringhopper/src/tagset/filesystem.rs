@@ -4,7 +4,19 @@ use ringhopper_structs::{EditableTag, Parameters, TagPath};
 use alloc::string::ToString;
 use ringhopper_structs::definitions::read_editable_tag;
 
-use std::path::PathBuf;
+#[cfg(feature = "minxp")]
+mod fs_mod {
+    pub use minxp::path::PathBuf;
+    pub use minxp::fs;
+}
+
+#[cfg(all(feature = "std", not(feature = "minxp")))]
+mod fs_mod {
+    pub use std::path::PathBuf;
+    pub use std::fs;
+}
+
+use fs_mod::*;
 
 /// Represents a tags directory on a filesystem.
 pub struct FilesystemTagset {
@@ -26,7 +38,7 @@ impl Tagset for FilesystemTagset {
 
         let path = self.tag_to_file_path(tag_path);
         let path_ref = &path;
-        let data = std::fs::read(path_ref).map_err(|e| {
+        let data = fs::read(path_ref).map_err(|e| {
             if path_ref.exists() {
                 ReadTagError::IOError { description: e.to_string() }
             }
@@ -44,7 +56,7 @@ impl Tagset for FilesystemTagset {
             .map_err(|e| WriteTagError::WriteError { description: e.to_string() })?;
 
         let path = self.tag_to_file_path(tag_path);
-        std::fs::write(path, &data)
+        fs::write(path, &data)
             .map_err(|e| WriteTagError::IOError { description: e.to_string() })
     }
 

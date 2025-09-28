@@ -6,10 +6,12 @@ edition = "2024"
 
 [dependencies]
 ringhopper-structs = { path = "../ringhopper-structs", default-features = false }
+minxp = { version = "0.1.6", optional = true }
 spin = "0.10.0"
 
 [features]
 std = ["ringhopper-structs/std"]
+minxp = ["dep:minxp"]
 default = []
 
 [lints]

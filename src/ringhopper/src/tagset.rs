@@ -3,7 +3,7 @@
 mod multi;
 mod cache;
 mod cow;
-#[cfg(feature = "std")]
+#[cfg(any(feature = "std", feature = "minxp"))]
 mod filesystem;
 
 use alloc::boxed::Box;
@@ -34,5 +34,5 @@ pub enum WriteTagError {
 pub use multi::*;
 pub use cow::*;
 pub use cache::*;
-#[cfg(feature = "std")]
+#[cfg(any(feature = "std", feature = "minxp"))]
 pub use filesystem::*;
