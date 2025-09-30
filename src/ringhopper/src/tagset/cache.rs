@@ -1,8 +1,9 @@
 use alloc::collections::BTreeMap;
 use ringhopper_structs::{EditableTag, Parameters, TagPath};
-use super::{ReadTagError, Tagset, WriteTagError};
+use super::{ReadTagError, Tagset, TagsetDirectoryEntry, WriteTagError};
 use alloc::boxed::Box;
 use alloc::borrow::ToOwned;
+use alloc::vec::Vec;
 use alloc::sync::Arc;
 use spin::Mutex;
 use spin::rwlock::RwLock;
@@ -165,5 +166,15 @@ impl<T: Tagset> Tagset for CachingTagset<T> {
     #[inline]
     fn is_writeable(&self) -> bool {
         self.delegate.is_writeable()
+    }
+
+    #[inline]
+    fn enumerate_directory(&self, dir: &str) -> Vec<TagsetDirectoryEntry> {
+        self.delegate.enumerate_directory(dir)
+    }
+
+    #[inline]
+    fn get_all_tags(&self) -> Vec<TagPath> {
+        self.delegate.get_all_tags()
     }
 }

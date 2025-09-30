@@ -4,11 +4,13 @@ use crate::{EditableTag, Parameters, TagPath, WriteableDataError};
 use alloc::boxed::Box;
 use alloc::collections::BTreeMap;
 use alloc::vec::Vec;
+use alloc::sync::Arc;
 use crate::definitions::scenario::Scenario;
 
 #[derive(Clone, Debug)]
 pub struct ParsedCacheFile {
-    tags: BTreeMap<TagPath, TagInfo>,
+    tags: BTreeMap<Arc<TagPath>, TagInfo>,
+    tag_paths: Vec<Arc<TagPath>>,
     sections: BTreeMap<DataSectionType, DataSection>,
 
     scenario_tag_id: TagID,
@@ -131,6 +133,11 @@ impl ParsedCacheFile {
                 _ => &self.buffers.cache[s.range.clone()]
             }
         )
+    }
+
+    #[inline]
+    pub fn tags(&self) -> &[Arc<TagPath>] {
+        self.tag_paths.as_slice()
     }
 }
 

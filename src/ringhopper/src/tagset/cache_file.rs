@@ -1,7 +1,11 @@
-use ringhopper_structs::{EditableTag, Parameters, ParsedCacheFile, TagPath};
-use crate::tagset::{ReadTagError, Tagset, WriteTagError};
+use ringhopper_structs::{is_path_separator, EditableTag, Parameters, ParsedCacheFile, TagPath, HALO_PATH_SEPARATOR, HALO_PATH_SEPARATOR_STR};
+use crate::tagset::{ReadTagError, Tagset, TagsetDirectoryEntry, WriteTagError};
 use alloc::boxed::Box;
 use alloc::string::ToString;
+use alloc::vec::Vec;
+use alloc::collections::BTreeSet;
+use alloc::borrow::ToOwned;
+use std::sync::Arc;
 
 impl Tagset for ParsedCacheFile {
     #[inline]
@@ -25,5 +29,50 @@ impl Tagset for ParsedCacheFile {
     #[inline]
     fn is_writeable(&self) -> bool {
         false
+    }
+
+    fn enumerate_directory(&self, dir: &str) -> Vec<TagsetDirectoryEntry> {
+        let mut dir_matched = dir.replace(is_path_separator, HALO_PATH_SEPARATOR_STR);
+        if !dir_matched.ends_with(HALO_PATH_SEPARATOR_STR) && !dir_matched.is_empty() {
+            dir_matched += HALO_PATH_SEPARATOR_STR;
+        }
+
+        let mut entries = BTreeSet::new();
+
+        for i in self.tags() {
+            let path = i.path();
+            let Some((prefix, suffix)) = path.split_at_checked(dir_matched.len()) else {
+                continue
+            };
+
+            if prefix != dir_matched {
+                continue
+            }
+
+            let mut entry_iterator = suffix.split(HALO_PATH_SEPARATOR);
+            let Some(stem) = entry_iterator.next() else {
+                continue
+            };
+            if entry_iterator.next().is_some() {
+                entries.insert(TagsetDirectoryEntry::Directory {
+                    filename: stem.to_owned()
+                });
+            }
+            else {
+                let filename = alloc::format!("{stem}.{}", i.group().as_str());
+                
+                entries.insert(TagsetDirectoryEntry::TagFile {
+                    filename,
+                    path: Arc::as_ref(&i).to_owned()
+                });
+            }
+        }
+
+        entries.into_iter().collect()
+    }
+
+    #[inline]
+    fn get_all_tags(&self) -> Vec<TagPath> {
+        self.tags().iter().map(|i| Arc::as_ref(&i).to_owned()).collect()
     }
 }

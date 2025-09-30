@@ -1,6 +1,7 @@
 use ringhopper_structs::{EditableTag, Parameters, TagPath};
-use super::{ReadTagError, Tagset, WriteTagError};
+use super::{ReadTagError, Tagset, TagsetDirectoryEntry, WriteTagError};
 use alloc::boxed::Box;
+use alloc::vec::Vec;
 
 /// Copy-on-write
 ///
@@ -58,5 +59,13 @@ impl<R: Tagset, W: Tagset> Tagset for CowTagset<R, W> {
     #[inline]
     fn is_writeable(&self) -> bool {
         self.writer.is_writeable()
+    }
+    #[inline]
+    fn enumerate_directory(&self, dir: &str) -> Vec<TagsetDirectoryEntry> {
+        self.reader.enumerate_directory(dir)
+    }
+    #[inline]
+    fn get_all_tags(&self) -> Vec<TagPath> {
+        self.reader.get_all_tags()
     }
 }

@@ -10,6 +10,9 @@ pub const MAX_PATH_LEN: usize = 255;
 /// Win32 path separator.
 pub const HALO_PATH_SEPARATOR: char = '\\';
 
+/// Win32 path separator.
+pub const HALO_PATH_SEPARATOR_STR: &str = "\\";
+
 /// Unix path separator, also supported by Win32 (automatically converted to Win32 on load).
 pub const UNIX_PATH_SEPARATOR: char = '/';
 
