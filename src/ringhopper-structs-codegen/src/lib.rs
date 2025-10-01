@@ -1,7 +1,8 @@
 use proc_macro::TokenStream;
 use std::collections::HashSet;
-use ringhopper_definitions::{Bitfield, Enum, FieldCount, FieldObject, NamedObject, ParsedDefinitions, SizeableObject, Struct, StructField, StructFieldType};
+use ringhopper_definitions::{load_all_definitions, Bitfield, EngineCompressionType, Enum, FieldCount, FieldObject, NamedObject, ParsedDefinitions, SizeableObject, Struct, StructField, StructFieldType};
 use std::fmt::write;
+use std::fmt::Write;
 
 #[proc_macro]
 pub fn generate_tag_group_enum(_: TokenStream) -> TokenStream {
@@ -719,3 +720,103 @@ fn generate_field_data(
 }
 
 type IOFn = fn(read_data: &mut String, field: &StructField, offset_start: usize, offset_end: usize, endianness: &str);
+
+#[proc_macro]
+pub fn generate_engine_defs(_: TokenStream) -> TokenStream {
+    let definitions = load_all_definitions();
+
+    let mut q = String::with_capacity(1024 * 1024 * 2);
+
+    q += "pub const ALL_ENGINES: &'static [Engine] = &[\n";
+
+    for i in definitions.engines.values() {
+        q += "Engine {\n";
+        writeln!(&mut q, "name: \"{}\",", i.name).unwrap();
+        writeln!(&mut q, "display_name: \"{}\",", i.display_name).unwrap();
+        writeln!(&mut q, "version: \"{}\",", i.version.as_ref().map(|i| i.as_str()).unwrap_or("")).unwrap();
+        writeln!(&mut q, "build: {},", i.build.as_ref().map(|i| {
+            let mut r = String::with_capacity(65536);
+            r += "Some(EngineBuild {\n";
+
+            writeln!(&mut r, "main: \"{}\",", i.string).unwrap();
+            writeln!(&mut r, "enforced: {},", i.enforced).unwrap();
+
+            r += "aliases: &[\n";
+            for alias in &i.aliases {
+                writeln!(&mut r, "\"{alias}\",").unwrap();
+            }
+            r += "],\n";
+
+            r += "})";
+            r
+        }).unwrap_or("None".to_owned())).unwrap();
+        writeln!(&mut q, "is_build_target: {},", i.build_target).unwrap();
+        writeln!(&mut q, "is_fallback: {},", i.fallback).unwrap();
+        writeln!(&mut q, "is_cache_default: {},", i.cache_default).unwrap();
+        writeln!(&mut q, "is_custom: {},", i.custom).unwrap();
+        writeln!(&mut q, "cache_file_version: {},", i.cache_file_version).unwrap();
+        writeln!(&mut q, "data_alignment: {},", i.data_alignment).unwrap();
+        writeln!(&mut q, "max_tag_space: {},", i.max_tag_space).unwrap();
+        writeln!(&mut q, "max_script_nodes: {},", i.max_script_nodes).unwrap();
+        writeln!(&mut q, "has_external_models: {},", i.external_models).unwrap();
+        writeln!(&mut q, "allows_external_bsps: {},", i.external_bsps).unwrap();
+        writeln!(&mut q, "uses_compressed_models: {},", i.compressed_models).unwrap();
+        writeln!(&mut q, "has_obfuscated_header_layout: {},", i.obfuscated_header_layout).unwrap();
+
+        q += "bitmaps: EngineBitmap {\n";
+        writeln!(&mut q, "swizzled: {}\n,", i.bitmap_options.swizzled).unwrap();
+        writeln!(&mut q, "texture_dimension_must_modulo_block_size: {}\n,", i.bitmap_options.texture_dimension_must_modulo_block_size).unwrap();
+        writeln!(&mut q, "cubemap_faces_stored_separately: {}\n,", i.bitmap_options.cubemap_faces_stored_separately).unwrap();
+        writeln!(&mut q, "alignment: {}\n,", i.bitmap_options.alignment).unwrap();
+        q += "}\n,";
+
+        q += "cache_file_size_limits: EngineCacheFileSizeLimits {\n";
+        writeln!(&mut q, "user_interface: {}\n,", i.max_cache_file_size.user_interface).unwrap();
+        writeln!(&mut q, "singleplayer: {}\n,", i.max_cache_file_size.singleplayer).unwrap();
+        writeln!(&mut q, "multiplayer: {}\n,", i.max_cache_file_size.multiplayer).unwrap();
+        q += "}\n,";
+
+        q += "base_memory_address: EngineBaseMemoryAddress {\n";
+        writeln!(&mut q, "address: {}\n,", i.base_memory_address.address).unwrap();
+        writeln!(&mut q, "inferred: {}\n,", i.base_memory_address.inferred).unwrap();
+        q += "}\n,";
+
+        writeln!(&mut q, "compression_type: EngineCompressionType::{},\n", match i.compression_type {
+            EngineCompressionType::Deflate => "Deflate",
+            EngineCompressionType::Uncompressed => "Uncompressed"
+        }).unwrap();
+
+        writeln!(&mut q, "resource_maps: {},\n", i.resource_maps.as_ref().map(|i| {
+            let mut r = String::with_capacity(65536);
+
+            r += "Some(EngineSupportedResourceMaps {\n";
+            writeln!(&mut r, "externally_indexed_tags: {},\n", i.externally_indexed_tags).unwrap();
+            r += "})";
+
+            r
+        }).unwrap_or("None".to_owned())).unwrap();
+
+        q += "required_tags: EngineRequiredTags {\n";
+
+        fn do_the_thing(q: &mut String, name: &str, things: &[String]) {
+            writeln!(q, "{name}: &[").unwrap();
+            for i in things {
+                writeln!(q, "\"{}\",", i.replace("\\", "\\\\")).unwrap();
+            }
+            *q += "],\n";
+        }
+
+        do_the_thing(&mut q, "all", &i.required_tags.all);
+        do_the_thing(&mut q, "user_interface", &i.required_tags.user_interface);
+        do_the_thing(&mut q, "multiplayer", &i.required_tags.multiplayer);
+        do_the_thing(&mut q, "singleplayer", &i.required_tags.singleplayer);
+
+        q += "},\n";
+
+        q += "},\n";
+    }
+
+    q += "];\n";
+
+    q.parse().expect("generate_engines parse fail")
+}

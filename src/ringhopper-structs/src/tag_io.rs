@@ -7,8 +7,8 @@ use alloc::string::String;
 use core::any::type_name;
 use funnel_web::crc::CRC32;
 use crate::{Address, Parameters, Reflexive, SimpleWriteableData, Strictness, TagPath, TagReference, MAX_PATH_LEN};
-use crate::definitions::tag::TagFileHeader;
-use crate::definitions::TagGroup;
+use crate::definitions::tag::tag::TagFileHeader;
+use crate::definitions::tag::TagGroup;
 use crate::simple_io::{ReflexiveC, TagDataC, TagReferenceC};
 
 pub trait MainTagStruct: WriteableData {

@@ -5,7 +5,7 @@ use alloc::string::ToString;
 use alloc::vec::Vec;
 use alloc::borrow::ToOwned;
 use alloc::string::String;
-use ringhopper_structs::definitions::{read_editable_tag, TagGroup};
+use ringhopper_structs::definitions::tag::{read_editable_tag, TagGroup};
 
 #[cfg(feature = "minxp")]
 mod fs_mod {

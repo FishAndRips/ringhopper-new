@@ -1,6 +1,6 @@
 use alloc::string::String;
 use core::fmt::{Debug, Display, Formatter};
-use crate::definitions::TagGroup;
+use crate::definitions::tag::TagGroup;
 use core::cmp::Ordering;
 use crate::util::*;
 
@@ -121,7 +121,7 @@ impl TagPath {
     ///
     /// ```
     /// use ringhopper_structs::TagPath;
-    /// use ringhopper_structs::definitions::TagGroup;
+    /// use ringhopper_structs::definitions::tag::TagGroup;
     ///
     /// let path = TagPath::from_path_with_extension("weapons\\myweapon\\myweapon.isthebest.weapon")
     ///                 .expect("tag path should be valid");
@@ -153,7 +153,7 @@ impl TagPath {
     ///
     /// ```
     /// use ringhopper_structs::TagPath;
-    /// use ringhopper_structs::definitions::TagGroup;
+    /// use ringhopper_structs::definitions::tag::TagGroup;
     ///
     /// let path = TagPath::from_path_without_extension("weapons\\myweapon\\myweapon.isthebest", TagGroup::Weapon)
     ///                 .expect("tag path should be valid");
@@ -280,7 +280,7 @@ impl TagPath {
     ///
     /// ```
     /// use ringhopper_structs::TagPath;
-    /// use ringhopper_structs::definitions::TagGroup;
+    /// use ringhopper_structs::definitions::tag::TagGroup;
     ///
     /// let mut path = TagPath::from_path_without_extension("weapons\\myweapon\\myweapon.isthebest", TagGroup::Weapon)
     ///                 .expect("tag path should be valid");

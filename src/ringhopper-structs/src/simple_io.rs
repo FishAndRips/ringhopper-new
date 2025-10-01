@@ -5,7 +5,7 @@ use funnel_web::rectangle::Rectangle;
 use funnel_web::string::ASCIIString;
 use funnel_web::vector::*;
 use crate::{Address, Bounds, ScenarioScriptNodeValue};
-use crate::definitions::TagGroup;
+use crate::definitions::tag::TagGroup;
 
 /// WriteableData for simple primitives.
 pub trait SimpleWriteableData: Copy + Clone + Sized {

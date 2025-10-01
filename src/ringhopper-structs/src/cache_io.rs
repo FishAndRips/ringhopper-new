@@ -1,11 +1,11 @@
 use funnel_web::id::TagID;
-use crate::definitions::cache::{CacheFileHeader, CacheFileHeaderPCDemo};
+use crate::definitions::tag::cache::{CEAFlags, CacheFileHeader, CacheFileHeaderPCDemo};
 use crate::{EditableTag, Parameters, TagPath, WriteableDataError};
 use alloc::boxed::Box;
 use alloc::collections::BTreeMap;
 use alloc::vec::Vec;
 use alloc::sync::Arc;
-use crate::definitions::scenario::Scenario;
+use crate::definitions::tag::scenario::Scenario;
 
 #[derive(Clone, Debug)]
 pub struct ParsedCacheFile {
@@ -142,8 +142,7 @@ impl ParsedCacheFile {
 }
 
 impl CacheFileHeaderPCDemo {
-    #[expect(unused)]
-    pub(crate) fn as_cache_file_header(self) -> CacheFileHeader {
+    pub const fn as_cache_file_header(self) -> CacheFileHeader {
         CacheFileHeader {
             map_type: self.map_type,
             head_fourcc: self.head_fourcc,
@@ -155,14 +154,18 @@ impl CacheFileHeaderPCDemo {
             crc32: self.crc32,
             decompressed_size: self.decompressed_size,
             foot_fourcc: self.foot_fourcc,
-            ..Default::default()
+            cea_flags: CEAFlags {
+                uses_bitmap_data_from_tags: false,
+                uses_sound_data_from_tags: false,
+                disable_anniversary_mode: false
+            },
+            compression_padding: 0
         }
     }
 }
 
 impl CacheFileHeader {
-    #[expect(unused)]
-    pub(crate) fn as_pc_demo_cache_file_header(self) -> CacheFileHeaderPCDemo {
+    pub const fn as_pc_demo_cache_file_header(self) -> CacheFileHeaderPCDemo {
         CacheFileHeaderPCDemo {
             map_type: self.map_type,
             head_fourcc: self.head_fourcc,

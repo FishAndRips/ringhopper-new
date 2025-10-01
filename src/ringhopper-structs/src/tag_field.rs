@@ -9,7 +9,7 @@ use core::ops::ControlFlow;
 use alloc::boxed::Box;
 use alloc::vec::Vec;
 use crate::{Address, Bounds, Parameters, Reflexive, ScenarioScriptNodeValue, TagReference, WriteableData, WriteableDataError};
-use crate::definitions::TagGroup;
+use crate::definitions::tag::TagGroup;
 use crate::util::{launder_reference_lifetime, launder_reference_lifetime_mut};
 
 pub trait EditableTagField: 'static + Any {
@@ -722,8 +722,8 @@ mod test {
     use alloc::string::ToString;
     use core::ops::ControlFlow;
     use funnel_web::vector::Vector3D;
-    use crate::definitions::biped::{Biped};
-    use crate::definitions::unit::UnitSeat;
+    use crate::definitions::tag::biped::{Biped};
+    use crate::definitions::tag::unit::UnitSeat;
 
     #[test]
     fn editable_string() {
