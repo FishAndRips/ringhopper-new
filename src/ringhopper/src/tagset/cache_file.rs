@@ -5,7 +5,7 @@ use alloc::string::ToString;
 use alloc::vec::Vec;
 use alloc::collections::BTreeSet;
 use alloc::borrow::ToOwned;
-use std::sync::Arc;
+use alloc::sync::Arc;
 
 impl Tagset for ParsedCacheFile {
     #[inline]
