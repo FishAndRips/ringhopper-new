@@ -28,6 +28,7 @@ pub mod tag {
 pub mod engine {
     use crate::{Parameters, Strictness};
     use crate::definitions::{FOOT_FOURCC, FOOT_FOURCC_OBFUSCATED, HEAD_FOURCC, HEAD_FOURCC_OBFUSCATED};
+    use crate::definitions::tag::cache::CacheFileHeader;
 
     #[derive(Debug)]
     pub struct Engine {
@@ -107,120 +108,125 @@ pub mod engine {
 
     ringhopper_structs_codegen::generate_engine_defs!();
 
-    /// Get the engine by its shorthand/name.
-    pub fn get_engine(engine: &str) -> Option<&'static Engine> {
-        ALL_ENGINES.binary_search_by(|i| i.name.cmp(engine))
-            .ok()
-            .map(|i| &ALL_ENGINES[i])
-    }
-
-    /// Match the first 2048 bytes of a cache file's header to an engine.
-    pub fn engine_from_header_bytes(bytes: &[u8]) -> Option<&'static Engine> {
-        use crate::SimpleWriteableData;
-        use super::tag;
-        use tag::cache::{CacheFileHeader, CacheFileHeaderPCDemo};
-        use alloc::vec::Vec;
-
-        let header_bytes = bytes.get(0x0..0x800)?;
-        let parameters = Parameters {
-            strictness: Strictness::Strict,
-            cache_only_fields: true,
-            tag_only_fields: false
-        };
-
-        let mut unobfuscated_header = CacheFileHeader::read_tag_data_simple::<byteorder::LittleEndian>(header_bytes, parameters)
-            .ok();
-        let mut obfuscated_header = CacheFileHeaderPCDemo::read_tag_data_simple::<byteorder::LittleEndian>(header_bytes, parameters)
-            .ok()
-            .map(|i| i.as_cache_file_header());
-
-        if unobfuscated_header.is_some_and(|h| h.head_fourcc != HEAD_FOURCC || h.foot_fourcc != FOOT_FOURCC) {
-            unobfuscated_header = None;
+    impl Engine {
+        /// Get the engine by its shorthand/name.
+        pub fn get(engine: &str) -> Option<&'static Self> {
+            ALL_ENGINES.binary_search_by(|i| i.name.cmp(engine))
+                .ok()
+                .map(|i| &ALL_ENGINES[i])
         }
 
-        if obfuscated_header.is_some_and(|h| h.head_fourcc != HEAD_FOURCC_OBFUSCATED || h.foot_fourcc != FOOT_FOURCC_OBFUSCATED) {
-            obfuscated_header = None;
-        }
+        /// Match the first 2048 bytes of a cache file's header to an engine.
+        pub fn read_header(bytes: &[u8]) -> Option<(&'static Self, CacheFileHeader)> {
+            use crate::SimpleWriteableData;
+            use super::tag;
+            use tag::cache::{CacheFileHeader, CacheFileHeaderPCDemo};
+            use alloc::vec::Vec;
 
-        let mut candidates: Vec<&'static Engine> = Vec::new();
-        let header: CacheFileHeader;
+            let header_bytes = bytes.get(0x0..0x800)?;
+            let parameters = Parameters {
+                strictness: Strictness::Strict,
+                ..Parameters::CACHE_FILES
+            };
 
-        if let Some(h) = unobfuscated_header {
-            candidates.extend(ALL_ENGINES.iter().filter(|e| !e.has_obfuscated_header_layout));
-            header = h;
-        }
-        else if let Some(h) = obfuscated_header {
-            candidates.extend(ALL_ENGINES.iter().filter(|e| e.has_obfuscated_header_layout));
-            header = h;
-        }
-        else {
-            return None
-        }
+            let mut unobfuscated_header = CacheFileHeader::read_tag_data_simple::<byteorder::LittleEndian>(header_bytes, parameters)
+                .ok();
+            let mut obfuscated_header = CacheFileHeaderPCDemo::read_tag_data_simple::<byteorder::LittleEndian>(header_bytes, parameters)
+                .ok()
+                .map(|i| i.as_cache_file_header());
 
-        let mut exact_match: Option<&'static Engine> = None;
-
-        candidates.retain(|i| {
-            if exact_match.is_some() {
-                return false;
+            if unobfuscated_header.is_some_and(|h| h.head_fourcc != HEAD_FOURCC || h.foot_fourcc != FOOT_FOURCC) {
+                unobfuscated_header = None;
             }
 
-            if header.cache_version != i.cache_file_version {
-                return false
+            if obfuscated_header.is_some_and(|h| h.head_fourcc != HEAD_FOURCC_OBFUSCATED || h.foot_fourcc != FOOT_FOURCC_OBFUSCATED) {
+                obfuscated_header = None;
             }
 
-            if let Some(b) = &i.build {
-                let build_str = header.build.as_str();
-                if b.main == build_str || b.aliases.contains(&build_str) {
-                    exact_match = Some(i);
-                    return true;
-                }
-                else if b.enforced {
+            let mut candidates: Vec<&'static Engine> = Vec::new();
+            let header: CacheFileHeader;
+
+            if let Some(h) = unobfuscated_header {
+                candidates.extend(ALL_ENGINES.iter().filter(|e| !e.has_obfuscated_header_layout));
+                header = h;
+            }
+            else if let Some(h) = obfuscated_header {
+                candidates.extend(ALL_ENGINES.iter().filter(|e| e.has_obfuscated_header_layout));
+                header = h;
+            }
+            else {
+                return None
+            }
+
+            let mut exact_match: Option<&'static Engine> = None;
+
+            candidates.retain(|i| {
+                if exact_match.is_some() {
                     return false;
                 }
-            }
 
-            true
-        });
+                if header.cache_version != i.cache_file_version {
+                    return false
+                }
 
-        if exact_match.is_some() {
-            return exact_match
+                if let Some(b) = &i.build {
+                    let build_str = header.build.as_str();
+                    if b.main == build_str || b.aliases.contains(&build_str) {
+                        exact_match = Some(i);
+                        return true;
+                    }
+                    else if b.enforced {
+                        return false;
+                    }
+                }
+
+                true
+            });
+
+            let check_for_match = (|| {
+                if exact_match.is_some() {
+                    return exact_match
+                }
+
+                let first = Some(candidates.iter().copied().next()?);
+
+                if candidates.len() == 1 {
+                    return first;
+                }
+
+                if let Some(c) = candidates.iter().copied().find(|i| i.is_build_target) {
+                    return Some(c)
+                }
+
+                if let Some(c) = candidates.iter().copied().find(|i| !i.is_fallback) {
+                    return Some(c)
+                }
+
+                first
+            })()?;
+
+            Some((check_for_match, header))
         }
-
-        let first = Some(candidates.iter().copied().next()?);
-
-        if candidates.len() == 1 {
-            return first;
-        }
-
-        if let Some(c) = candidates.iter().copied().find(|i| i.is_build_target) {
-            return Some(c)
-        }
-
-        if let Some(c) = candidates.iter().copied().find(|i| !i.is_fallback) {
-            return Some(c)
-        }
-
-        first
     }
 }
 
 #[cfg(test)]
 mod test {
-    use crate::definitions::engine::{engine_from_header_bytes, get_engine, ALL_ENGINES};
+    use crate::definitions::engine::{Engine, ALL_ENGINES};
 
     #[test]
     fn header_check() {
         let custom_edition = include_bytes!("definitions/bloodgulch_custom_edition_header.bin");
-        assert_eq!(engine_from_header_bytes(custom_edition).expect("could not match custom edition").name, "pc-custom", "Halo Custom Edition's header matched the wrong engine");
+        assert_eq!(Engine::read_header(custom_edition).expect("could not match custom edition").0.name, "pc-custom", "Halo Custom Edition's header matched the wrong engine");
 
         let trial = include_bytes!("definitions/bloodgulch_trial_header.bin");
-        assert_eq!(engine_from_header_bytes(trial).expect("could not match halo trial").name, "pc-demo", "Halo Trial's header matched the wrong engine");
+        assert_eq!(Engine::read_header(trial).expect("could not match halo trial").0.name, "pc-demo", "Halo Trial's header matched the wrong engine");
     }
 
     #[test]
     fn all_engines_can_be_found_by_get_engine() {
         for i in ALL_ENGINES {
-            let Some(e) = get_engine(i.name) else {
+            let Some(e) = Engine::get(i.name) else {
                 panic!("Failed to find engine {}", i.name);
             };
             assert_eq!(i.name, e.name, "Found an engine {} but it was actually {}", i.name, e.name);

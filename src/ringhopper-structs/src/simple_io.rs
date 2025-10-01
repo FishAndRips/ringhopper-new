@@ -32,11 +32,37 @@ pub enum Strictness {
     Strict
 }
 
+/// Trust me, bro.
+#[derive(Copy, Clone, PartialEq, Debug)]
+pub enum ForceBaseMemoryAddress {
+    ForceInferred,
+    ForceFixed
+}
+
 #[derive(Copy, Clone, PartialEq, Debug)]
 pub struct Parameters {
     pub strictness: Strictness,
+    pub base_memory_address: Option<ForceBaseMemoryAddress>,
     pub cache_only_fields: bool,
     pub tag_only_fields: bool
+}
+
+impl Parameters {
+    /// Default parameters for reading from tag files
+    pub const TAG_FILES: Parameters = Parameters {
+        strictness: Strictness::Strict,
+        tag_only_fields: true,
+        cache_only_fields: false,
+        base_memory_address: None
+    };
+
+    /// Default parameters for reading from cache files
+    pub const CACHE_FILES: Parameters = Parameters {
+        strictness: Strictness::Strict,
+        tag_only_fields: false,
+        cache_only_fields: true,
+        base_memory_address: None
+    };
 }
 
 macro_rules! byte_io {
