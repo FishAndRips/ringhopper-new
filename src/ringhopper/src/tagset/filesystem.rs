@@ -61,7 +61,7 @@ impl Tagset for FilesystemTagset {
 
     fn write_tag(&mut self, tag_path: &TagPath, tag: &dyn EditableTag, parameters: Parameters) -> Result<(), WriteTagError> {
         let data = tag.write_tag_to_vec(parameters)
-            .map_err(|e| WriteTagError::WriteError { description: e.to_string() })?;
+            .map_err(|e| WriteTagError::SerializeError { description: e.to_string() })?;
 
         let path = self.tag_to_file_path(tag_path);
         fs::write(path, &data)

@@ -3,7 +3,7 @@ use super::{ReadTagError, Tagset, TagsetDirectoryEntry, WriteTagError};
 use alloc::boxed::Box;
 use alloc::vec::Vec;
 
-/// Copy-on-write
+/// Copy-on-write tagset.
 ///
 /// Only reads from reader and writes to writer.
 ///

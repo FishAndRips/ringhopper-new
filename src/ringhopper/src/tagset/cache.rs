@@ -8,8 +8,9 @@ use alloc::sync::Arc;
 use spin::Mutex;
 use spin::rwlock::RwLock;
 
+/// Determines the writing behavior of [`CachingTagset`].
 #[derive(Copy, Clone, PartialEq)]
-pub enum CacheBehavior {
+pub enum CachingTagsetWriteBehavior {
     /// Writes are immediately committed into the tagset.
     WriteImmediate,
 
@@ -17,13 +18,18 @@ pub enum CacheBehavior {
     WriteDelayed
 }
 
-/// A caching tag set
+/// Adds a cache to the tagset.
 ///
-/// If T::is_writeable is false, then all writes will fail without any further interaction with the
-/// delegate.
+/// If a tag is read, it will be cached. If a tag is cached, then reads will use the cache.
+///
+/// You can opt to have writes also only write to the cache, creating an 'ephemeral' tagset that can
+/// be flushed manually.
+///
+/// If [`delegate.is_writeable()`](Tagset::is_writeable) is false, then all writes will fail without
+/// any further interaction with the delegate.
 pub struct CachingTagset<T: Tagset> {
     delegate: T,
-    behavior: CacheBehavior,
+    behavior: CachingTagsetWriteBehavior,
     cache: RwLock<InnerCache>
 }
 
@@ -44,7 +50,7 @@ impl InnerCache {
 impl<T: Tagset> CachingTagset<T> {
     /// Instantiate a new caching tag set.
     #[inline]
-    pub const fn new(delegate: T, behavior: CacheBehavior) -> Self {
+    pub const fn new(delegate: T, behavior: CachingTagsetWriteBehavior) -> Self {
         Self {
             delegate, behavior, cache: RwLock::new(InnerCache { tag_cache: BTreeMap::new(), edited_tags: BTreeMap::new() })
         }
@@ -54,12 +60,12 @@ impl<T: Tagset> CachingTagset<T> {
     ///
     /// Writes all cached tags back to the delegate.
     ///
-    /// Does nothing if behavior is [CacheBehavior::WriteImmediate].
+    /// Does nothing if behavior is [CachingTagsetWriteBehavior::WriteImmediate].
     pub fn flush(&mut self) -> Result<(), BTreeMap<TagPath, WriteTagError>> {
         let mut cache = self.cache.write();
         let (tag_cache, edited_tags) = cache.get_caches();
 
-        if tag_cache.is_empty() || self.behavior == CacheBehavior::WriteImmediate {
+        if tag_cache.is_empty() || self.behavior == CachingTagsetWriteBehavior::WriteImmediate {
             return Ok(())
         }
 
@@ -147,10 +153,10 @@ impl<T: Tagset> Tagset for CachingTagset<T> {
 
         let mut cache = self.cache.write();
         match self.behavior {
-            CacheBehavior::WriteImmediate => {
+            CachingTagsetWriteBehavior::WriteImmediate => {
                 self.delegate.write_tag(tag_path, tag, parameters)?;
             }
-            CacheBehavior::WriteDelayed => {
+            CachingTagsetWriteBehavior::WriteDelayed => {
                 cache.edited_tags.insert(tag_path.to_owned(), parameters);
             }
         }
