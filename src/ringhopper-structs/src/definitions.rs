@@ -93,9 +93,9 @@ pub mod engine {
         Deflate
     }
 
-    #[derive(Debug)]
+    #[derive(Copy, Clone, Debug)]
     pub struct EngineSupportedResourceMaps {
-        externally_indexed_tags: bool
+        pub externally_indexed_tags: bool
     }
 
     #[derive(Debug)]

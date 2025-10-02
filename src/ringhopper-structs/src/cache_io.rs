@@ -1,18 +1,21 @@
-use funnel_web::id::TagID;
-use crate::definitions::tag::cache::{CEAFlags, CacheFileHeader, CacheFileHeaderPCDemo, CacheFileTagDataHeader, CacheFileTagDataHeaderExternalModels, CacheFileTagDataHeaderInternalModels};
-use crate::{EditableTag, ForceBaseMemoryAddress, Parameters, TagPath, WriteableData, WriteableDataError};
+use crate::definitions::engine::{Engine, EngineCompressionType};
+use crate::definitions::tag::cache::{CEAFlags, CacheFileHeader, CacheFileHeaderPCDemo, CacheFileTag, CacheFileTagDataHeader, CacheFileTagDataHeaderExternalModels, CacheFileTagDataHeaderInternalModels};
+use crate::definitions::tag::scenario::Scenario;
+use crate::definitions::tag::TagGroup;
+use crate::{EditableTag, ForceBaseMemoryAddress, Parameters, SimpleWriteableData, TagPath, WriteableData, WriteableDataError};
+use alloc::borrow::ToOwned;
 use alloc::boxed::Box;
 use alloc::collections::BTreeMap;
-use alloc::vec::Vec;
-use alloc::sync::Arc;
 use alloc::string::String;
-use alloc::borrow::ToOwned;
 use alloc::string::ToString;
+use alloc::sync::Arc;
+use alloc::vec::Vec;
 use byteorder::LittleEndian;
-use crate::definitions::engine::{Engine, EngineCompressionType};
-use crate::definitions::tag::scenario::Scenario;
+use core::ffi::CStr;
+use funnel_web::id::TagID;
 
 #[derive(Clone, Debug)]
+#[expect(unused)]
 pub struct ParsedCacheFile {
     decompressed_cache: Option<Vec<u8>>,
 
@@ -20,6 +23,7 @@ pub struct ParsedCacheFile {
     tag_paths: Vec<Arc<TagPath>>,
     sections: BTreeMap<DataSectionType, DataSection>,
     engine: &'static Engine,
+    base_memory_address: u32,
 
     scenario_tag_id: TagID,
     scenario_tag_data: Box<Scenario>,
@@ -37,7 +41,10 @@ pub(crate) struct TagInfo {
     pub section: DataSectionType,
 
     /// Offset in the section
-    pub offset: usize
+    pub offset: usize,
+
+    /// Only the main struct is in the map; the rest is in Sounds
+    pub external_sound: bool
 }
 
 #[derive(Copy, Clone, PartialEq, Debug, Ord, PartialOrd, Eq)]
@@ -88,20 +95,21 @@ impl ParsedCacheFile {
         let (engine, header) = Engine::read_header(&buffers.cache)
             .ok_or(LoadCacheFileError::UnknownEngine)?;
 
-        let mut buffer_to_use = buffers.cache.as_slice();
+        let mut cache_buffer = buffers.cache.as_slice();
         let mut decompressed_buffer: Vec<u8> = Vec::new();
-
         match engine.compression_type {
             EngineCompressionType::Uncompressed => (),
-            EngineCompressionType::Deflate => todo!("DEFLATE")
-        }
-
-        let tag_data_offset = header.tag_data_offset as usize;
+            EngineCompressionType::Deflate => {
+                decompressed_buffer = inflate_cache_file(buffers.cache.as_slice());
+                cache_buffer = decompressed_buffer.as_slice();
+            }
+        };
 
         // if this overflows, it is wrong (since we managed to load the whole map in RAM somehow)
+        let tag_data_offset = header.tag_data_offset as usize;
         let tag_data_end = tag_data_offset.checked_add(header.tag_data_size as usize).ok_or(LoadCacheFileError::CorruptHeader)?;
 
-        let tag_data = buffer_to_use.get(tag_data_offset..tag_data_end).ok_or(LoadCacheFileError::CorruptHeader)?;
+        let tag_data = cache_buffer.get(tag_data_offset..tag_data_end).ok_or(LoadCacheFileError::CorruptHeader)?;
         let base_header = CacheFileTagDataHeader::read_tag_data::<LittleEndian>(
             tag_data,
             0,
@@ -109,92 +117,97 @@ impl ParsedCacheFile {
             parameters
         )?;
 
-        let header_size = if engine.has_external_models {
-            CacheFileTagDataHeaderExternalModels::base_length()
-        }
-        else {
-            CacheFileTagDataHeaderInternalModels::base_length()
-        } as u32;
-
-        let mut base_memory_address = engine.base_memory_address.address;
-
         let tag_array_address = base_header.tag_array_address.0;
-        let eschaton_base_memory_address = tag_array_address
-            .checked_sub(header_size)
-            .ok_or(LoadCacheFileError::CorruptMap { description: "Underflowed the base memory address".to_owned() })?;
+        let base_memory_address = find_base_memory_address(
+            engine,
+            &header,
+            base_header.tag_array_address.0,
+            parameters
+        )?;
+        debug_assert!(tag_array_address > base_memory_address, "bad base memory address calculation; tag array is before the tag data somehow");
 
-        match parameters.base_memory_address {
-            Some(ForceBaseMemoryAddress::ForceFixed) => base_memory_address = engine.base_memory_address.address,
-            Some(ForceBaseMemoryAddress::ForceInferred) => base_memory_address = eschaton_base_memory_address,
-            None => {
-                if engine.base_memory_address.inferred {
-                    // The tag data's base memory address is inferred based on the location of the tag array
-                    // which is assumed to immediately be after the header.
-                    base_memory_address = eschaton_base_memory_address;
-                }
-                else {
-                    let expected_tag_array_address = base_memory_address + header_size;
+        let get_tag_data = |address: u32, length: Option<usize>| -> Result<&[u8], LoadCacheFileError> {
+            let offset = tag_array_address.checked_sub(address)
+                .ok_or_else(|| LoadCacheFileError::CorruptMap {
+                    description: alloc::format!("Tried to get tag address 0x{address:08X} which is outside of the tag data...")
+                })? as usize;
 
-                    // The tag data's base memory address is fixed for the target engine. We should
-                    // still check, though, as bad things may happen if we proceed.
-                    //
-                    // If the tag array is not where we think it is, then one of three things are
-                    // true about this map:
-                    //
-                    // - The map's tag array was moved by a map protector/corruptor.
-                    //   Proceeding will DEFINITELY fail (for unrelated reasons).
-                    //
-                    // - The map was built with its tag array in a different location.
-                    //   Proceeding MIGHT not fail.
-                    //
-                    // - The map is for an untracked beta build of the game we can't detect.
-                    //   Proceeding will DEFINITELY fail (for this reason).
-                    //
-                    // The most likely case is the first one. There are a very, very small number of
-                    // maps in the wild that have their tag array in a different location that
-                    // aren't corrupted. To proceed, use `ForceBaseMemoryAddress::ForceFixed`.
-                    //
-                    // In case of the third one, there's no way to really discern untracked (i.e. no
-                    // build string) versions of the game. If the beta is especially old, the
-                    // definitions may very possibly not even work. Feel free to try your luck with
-                    // `ForceBaseMemoryAddress::ForceInferred`.
-                    if tag_array_address != expected_tag_array_address {
-                        let description = alloc::format!(
-                            "Incorrect tag array address (expected 0x{expected_tag_array_address:08X}, got 0x{tag_array_address:08X})"
-                        );
-                        let estimate = alloc::format!(
-                            "(detected engine = \"{}\", expected address = 0x{base_memory_address:08X}, estimated address = 0x{eschaton_base_memory_address:08X}, cache file build = \"{}\")",
-                            engine.name,
-                            header.build
-                        );
+            tag_data.get(offset..)
+                .and_then(|i| match length {
+                    Some(j) => i.get(0..j),
+                    None => Some(i)
+                })
+                .ok_or_else(|| LoadCacheFileError::CorruptMap {
+                    description: alloc::format!("Tried to get tag address 0x{address:08X} with length {length:?} but it overflowed...")
+                })
+        };
 
-                        let possible_range = base_memory_address..base_memory_address.saturating_add(header.tag_data_size);
+        let tag_count = base_header.tag_count as usize;
+        let tag_entry_size = CacheFileTag::length();
+        let tag_entries_size = tag_entry_size.checked_mul(tag_count).ok_or_else(|| LoadCacheFileError::CorruptMap { description: "bad tag count".to_string() })?;
+        let mut all_tags: BTreeMap<Arc<TagPath>, TagInfo> = BTreeMap::new();
 
-                        return if header.build.as_str().is_empty() {
-                            Err(LoadCacheFileError::MapDetectionError {
-                                description: alloc::format!("{description} - Map appears to be for an untracked version of the game which may be using a different base memory address! {estimate}")
-                            })
-                        }
-                        else if engine.is_fallback {
-                            Err(LoadCacheFileError::MapDetectionError {
-                                description: alloc::format!("{description} - Map appears to be for an unknown version of the game which may be using a different base memory address! {estimate}")
-                            })
-                        }
-                        else if !possible_range.contains(&tag_array_address) {
-                            Err(LoadCacheFileError::MapDetectionError {
-                                description: alloc::format!("{description} - The map's base memory address is incorrect for what engine was detected {estimate}")
-                            })
-                        }
-                        else {
-                            Err(LoadCacheFileError::MapDetectionError {
-                                description: alloc::format!("{description} - Map appears to have its tag array moved somewhere else in its tag space OR it has a different base memory address; it is possibly protected/corrupted, so we're refusing to load it! {estimate}")
-                            })
-                        };
+        let tags = get_tag_data(
+            tag_array_address,
+            Some(tag_entries_size)
+        )?;
+
+        for tag_chunk_index in tags.chunks(tag_entry_size).enumerate().map(
+            |(index, t)| CacheFileTag::read_tag_data_simple::<LittleEndian>(t, parameters)
+                .map_err(|t| LoadCacheFileError::CorruptMap { description: alloc::format!("Bad tag entry #{index} - {t}") })
+                .map(|t| (index, t))
+        ) {
+            let (index, tag_chunk) = tag_chunk_index?;
+
+            // Ignore this; it is likely a MISSINGNO.
+            if tag_chunk.tag_group == TagGroup::None {
+                continue
+            }
+
+            let tag_path_bytes = get_tag_data(tag_chunk.path.0, None)?;
+            let tag_path = {
+                // Find the null terminator
+                CStr::from_bytes_until_nul(tag_path_bytes).map_err(|_| LoadCacheFileError::CorruptMap {
+                    description: alloc::format!("Bad tag path (no null terminator) #{index}")
+                })
+
+                // To UTF-8
+                .and_then(|t| t.to_str().map_err(|_| LoadCacheFileError::CorruptMap {
+                    description: alloc::format!("Bad tag path (non-utf-8) #{index}")
+                }))
+
+                // Parse
+                .and_then(|t| TagPath::from_path_without_extension(t, tag_chunk.tag_group).map_err(|e| LoadCacheFileError::CorruptMap {
+                    description: alloc::format!("Bad tag path ({e}) #{index}")
+                }))
+            }?;
+
+            if all_tags.contains_key(&tag_path) {
+                return Err(LoadCacheFileError::CorruptMap {
+                    description: alloc::format!("Duplicate tag path #{index} - {tag_path}")
+                })
+            }
+
+            let mut external_sound = false;
+            all_tags.insert(Arc::new(tag_path), TagInfo {
+                tag_id: tag_chunk.id,
+                section: if engine.resource_maps.is_some_and(|i| i.externally_indexed_tags) {
+                    match tag_chunk.tag_group {
+                        TagGroup::Sound => {
+                            external_sound = true;
+                            DataSectionType::TagData
+                        },
+                        TagGroup::Bitmap => DataSectionType::Bitmaps,
+                        _ => DataSectionType::Loc
                     }
                 }
-            }
+                else {
+                    DataSectionType::TagData
+                },
+                external_sound,
+                offset: todo!()
+            });
         }
-
 
 
         todo!()
@@ -322,4 +335,103 @@ impl CacheFileHeader {
             foot_fourcc: self.foot_fourcc
         }
     }
+}
+
+fn find_base_memory_address(
+    engine: &Engine,
+    header: &CacheFileHeader,
+    tag_array_address: u32,
+    parameters: Parameters
+) -> Result<u32, LoadCacheFileError> {
+    let header_size = if engine.has_external_models {
+        CacheFileTagDataHeaderExternalModels::base_length()
+    }
+    else {
+        CacheFileTagDataHeaderInternalModels::base_length()
+    } as u32;
+
+    let engine_base_memory_address = engine
+        .base_memory_address
+        .address;
+    let eschaton_base_memory_address = tag_array_address
+        .checked_sub(header_size)
+        .ok_or(LoadCacheFileError::CorruptMap { description: "Underflowed the base memory address".to_owned() })?;
+
+    match parameters.base_memory_address {
+        Some(ForceBaseMemoryAddress::ForceFixed) => Ok(engine.base_memory_address.address),
+        Some(ForceBaseMemoryAddress::ForceInferred) => Ok(eschaton_base_memory_address),
+        None => {
+            if engine.base_memory_address.inferred {
+                // The tag data's base memory address is inferred based on the location of the tag array
+                // which is assumed to immediately be after the header.
+                Ok(eschaton_base_memory_address)
+            }
+            else {
+                let expected_tag_array_address = engine_base_memory_address + header_size;
+
+                // The tag data's base memory address is fixed for the target engine. We should
+                // still check, though, as bad things may happen if we proceed.
+                //
+                // If the tag array is not where we think it is, then one of three things are
+                // true about this map:
+                //
+                // - The map's tag array was moved by a map protector/corruptor.
+                //   Proceeding will DEFINITELY fail (for unrelated reasons).
+                //
+                // - The map was built with its tag array in a different location.
+                //   Proceeding MIGHT not fail.
+                //
+                // - The map is for an untracked beta build of the game we can't detect.
+                //   Proceeding will DEFINITELY fail (for this reason).
+                //
+                // The most likely case is the first one. There are a very, very small number of
+                // maps in the wild that have their tag array in a different location that
+                // aren't corrupted. To proceed, use `ForceBaseMemoryAddress::ForceFixed`.
+                //
+                // In case of the third one, there's no way to really discern untracked (i.e. no
+                // build string) versions of the game. If the beta is especially old, the
+                // definitions may very possibly not even work. Feel free to try your luck with
+                // `ForceBaseMemoryAddress::ForceInferred`.
+                if tag_array_address != expected_tag_array_address {
+                    let description = alloc::format!(
+                        "Incorrect tag array address (expected 0x{expected_tag_array_address:08X}, got 0x{tag_array_address:08X})"
+                    );
+                    let estimate = alloc::format!(
+                        "(detected engine = \"{}\", expected address = 0x{engine_base_memory_address:08X}, estimated address = 0x{eschaton_base_memory_address:08X}, cache file build = \"{}\")",
+                        engine.name,
+                        header.build
+                    );
+
+                    let possible_range = engine_base_memory_address..engine_base_memory_address.saturating_add(header.tag_data_size);
+
+                    return if header.build.as_str().is_empty() {
+                        Err(LoadCacheFileError::MapDetectionError {
+                            description: alloc::format!("{description} - Map appears to be for an untracked version of the game which may be using a different base memory address! {estimate}")
+                        })
+                    }
+                    else if engine.is_fallback {
+                        Err(LoadCacheFileError::MapDetectionError {
+                            description: alloc::format!("{description} - Map appears to be for an unknown version of the game which may be using a different base memory address! {estimate}")
+                        })
+                    }
+                    else if !possible_range.contains(&tag_array_address) {
+                        Err(LoadCacheFileError::MapDetectionError {
+                            description: alloc::format!("{description} - The map's base memory address is incorrect for what engine was detected {estimate}")
+                        })
+                    }
+                    else {
+                        Err(LoadCacheFileError::MapDetectionError {
+                            description: alloc::format!("{description} - Map appears to have its tag array moved somewhere else in its tag space OR it has a different base memory address; it is possibly protected/corrupted, so we're refusing to load it! {estimate}")
+                        })
+                    };
+                }
+                Ok(engine_base_memory_address)
+            }
+        }
+    }
+}
+
+#[expect(unused)]
+fn inflate_cache_file(cache_file: &[u8]) -> Vec<u8> {
+    todo!("DEFLATE")
 }
