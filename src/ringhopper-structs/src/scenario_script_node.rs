@@ -83,7 +83,7 @@ impl ScenarioScriptNodeValue {
     /// Returns `None` if the ID is not valid.
     #[inline]
     #[must_use]
-    pub const fn as_id<const SALT: u16>(&self) -> Option<ID<SALT>> {
+    pub const fn as_id<const SALT: u16>(&self) -> ID<SALT> {
         ID::<SALT>::from_u32(self.0)
     }
 }
@@ -152,13 +152,13 @@ impl PartialEq<ScenarioScriptNodeValue> for bool {
 impl<const SALT: u16> PartialEq<ID<SALT>> for ScenarioScriptNodeValue {
     #[inline]
     fn eq(&self, other: &ID<SALT>) -> bool {
-        self.as_id() == Some(*other)
+        self.as_id() == *other
     }
 }
 
 impl<const SALT: u16> PartialEq<ScenarioScriptNodeValue> for ID<SALT> {
     #[inline]
     fn eq(&self, other: &ScenarioScriptNodeValue) -> bool {
-        Some(*self) == other.as_id()
+        *self == other.as_id()
     }
 }

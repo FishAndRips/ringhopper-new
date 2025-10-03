@@ -10,9 +10,9 @@ use alloc::sync::Arc;
 impl Tagset for ParsedCacheFile {
     #[inline]
     fn read_tag(&self, tag_path: &TagPath, parameters: Parameters) -> Result<Box<dyn EditableTag>, ReadTagError> {
-        let tag_id = self.tag_path_to_tag_id(tag_path)
+        let tag_index = self.tag_path_to_tag_index(tag_path)
             .ok_or(ReadTagError::NotFound)?;
-        self.extract_tag(tag_id, parameters)
+        self.extract_tag(tag_index, parameters)
             .map_err(|e| ReadTagError::ParseError { description: e.to_string() })
     }
 
@@ -23,7 +23,7 @@ impl Tagset for ParsedCacheFile {
 
     #[inline]
     fn has_tag(&self, tag_path: &TagPath) -> bool {
-        self.tag_path_to_tag_id(tag_path).is_some()
+        self.tag_path_to_tag_index(tag_path).is_some()
     }
 
     #[inline]
@@ -39,7 +39,7 @@ impl Tagset for ParsedCacheFile {
 
         let mut entries = BTreeSet::new();
 
-        for i in self.tags() {
+        for i in self.tag_paths_sorted() {
             let path = i.path();
             let Some((prefix, suffix)) = path.split_at_checked(dir_matched.len()) else {
                 continue
@@ -73,6 +73,6 @@ impl Tagset for ParsedCacheFile {
 
     #[inline]
     fn get_all_tags(&self) -> Vec<TagPath> {
-        self.tags().iter().map(|i| Arc::as_ref(&i).to_owned()).collect()
+        self.tag_paths_sorted().iter().map(|i| Arc::as_ref(&i).to_owned()).collect()
     }
 }

@@ -8,7 +8,7 @@ edition = "2024"
 proc-macro = true
 
 [dependencies]
-ringhopper-definitions = { git = "https://github.com/FishAndRips/ringhopper-definitions.git", rev = "884aa37a171b0edc36a7e836f23ed10fc36a7482" }
+ringhopper-definitions = { git = "https://github.com/FishAndRips/ringhopper-definitions.git", rev = "e25a1cfc697d75258b29f123da3677d0c4c41d6a" }
 
 [lints]
 workspace = true

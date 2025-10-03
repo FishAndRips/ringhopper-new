@@ -6,6 +6,7 @@ extern crate std;
 
 pub use funnel_web;
 
+pub mod constants;
 mod util;
 mod tag_path;
 mod simple_io;
@@ -27,3 +28,4 @@ pub use reflexive::*;
 pub use tag_field::*;
 pub use cache_io::*;
 pub mod definitions;
+mod compression;

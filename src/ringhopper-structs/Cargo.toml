@@ -5,9 +5,10 @@ license = "GPL-3.0-only"
 edition = "2024"
 
 [dependencies]
-funnel-web = { git = "https://github.com/FishAndRips/funnel-web.git", rev = "151ffac88fd9579d7887baf8723b1ae9a3625c01" }
+funnel-web = { git = "https://github.com/FishAndRips/funnel-web.git", rev = "538ce4533911a2e9f0dcfd8ee81c5678f3b8a8ec" }
 ringhopper-structs-codegen = { path = "../ringhopper-structs-codegen" }
 byteorder = "1.5.0"
+libz-rs-sys = { version = "0.5.2", features = ["rust-allocator"], default-features = false }
 
 [features]
 default = []

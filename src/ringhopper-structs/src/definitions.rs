@@ -45,6 +45,7 @@ pub mod engine {
 
         pub base_memory_address: EngineBaseMemoryAddress,
         pub data_alignment: usize,
+        pub compressed_data_alignment: usize,
         pub bitmaps: EngineBitmap,
         pub has_external_models: bool,
         pub uses_compressed_models: bool,

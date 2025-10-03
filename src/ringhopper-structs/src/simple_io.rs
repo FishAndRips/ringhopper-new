@@ -210,7 +210,8 @@ impl SimpleWriteableData for ScenarioScriptNodeValue {
 impl<const SALT: u16> SimpleWriteableData for ID<SALT> {
     #[inline]
     fn read_tag_data_simple<B: ByteOrder>(from: &[u8], parameters: Parameters) -> Result<Self, &'static str> {
-        Self::from_u32(u32::read_tag_data_simple::<B>(from, parameters)?).ok_or("invalid id data")
+        let u32_data = u32::read_tag_data_simple::<B>(from, parameters)?;
+        Ok(Self::from_u32(u32_data))
     }
     #[inline]
     fn write_tag_data_simple<B: ByteOrder>(&self, to: &mut [u8], parameters: Parameters) {

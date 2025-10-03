@@ -756,6 +756,7 @@ pub fn generate_engine_defs(_: TokenStream) -> TokenStream {
         writeln!(&mut q, "is_custom: {},", i.custom).unwrap();
         writeln!(&mut q, "cache_file_version: {},", i.cache_file_version).unwrap();
         writeln!(&mut q, "data_alignment: {},", i.data_alignment).unwrap();
+        writeln!(&mut q, "compressed_data_alignment: {},", i.compressed_data_alignment).unwrap();
         writeln!(&mut q, "max_tag_space: {},", i.max_tag_space).unwrap();
         writeln!(&mut q, "max_script_nodes: {},", i.max_script_nodes).unwrap();
         writeln!(&mut q, "has_external_models: {},", i.external_models).unwrap();
