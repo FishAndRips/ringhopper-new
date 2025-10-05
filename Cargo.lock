@@ -15,11 +15,18 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "1fd0f2584146f6f2ef48085050886acf353beff7305ebd1ae69500e27c67f64b"
 
 [[package]]
+name = "combarc"
+version = "0.1.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "86228027b6daa3077726a86e7ac9500dc450edd255ccae76fdeaca22fae89a13"
+
+[[package]]
 name = "funnel-web"
 version = "0.1.0"
-source = "git+https://github.com/FishAndRips/funnel-web.git?rev=538ce4533911a2e9f0dcfd8ee81c5678f3b8a8ec#538ce4533911a2e9f0dcfd8ee81c5678f3b8a8ec"
+source = "git+https://github.com/FishAndRips/funnel-web.git?rev=f22d3a9bdf24368796711c9a491ff9eaaad08cd7#f22d3a9bdf24368796711c9a491ff9eaaad08cd7"
 dependencies = [
  "libm",
+ "spin",
 ]
 
 [[package]]
@@ -97,13 +104,12 @@ version = "0.2.0"
 dependencies = [
  "minxp",
  "ringhopper-structs",
- "spin",
 ]
 
 [[package]]
 name = "ringhopper-definitions"
 version = "0.2.0"
-source = "git+https://github.com/FishAndRips/ringhopper-definitions.git?rev=e25a1cfc697d75258b29f123da3677d0c4c41d6a#e25a1cfc697d75258b29f123da3677d0c4c41d6a"
+source = "git+https://github.com/FishAndRips/ringhopper-definitions.git?rev=819e620f20b4ade2ea04b95d52b7a700aef9d93b#819e620f20b4ade2ea04b95d52b7a700aef9d93b"
 dependencies = [
  "serde_json",
  "spin",
@@ -114,9 +120,12 @@ name = "ringhopper-structs"
 version = "0.2.0"
 dependencies = [
  "byteorder",
+ "combarc",
  "funnel-web",
  "libz-rs-sys",
  "ringhopper-structs-codegen",
+ "spin",
+ "tinyvec",
 ]
 
 [[package]]
@@ -189,6 +198,21 @@ dependencies = [
  "quote",
  "unicode-ident",
 ]
+
+[[package]]
+name = "tinyvec"
+version = "1.10.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "bfa5fdc3bce6191a1dbc8c02d5c8bffcf557bafa17c124c5264a458f1b0613fa"
+dependencies = [
+ "tinyvec_macros",
+]
+
+[[package]]
+name = "tinyvec_macros"
+version = "0.1.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "1f3ccbac311fea05f86f61904b462b55fb3df8837a366dfc601a0161d0532f20"
 
 [[package]]
 name = "unicode-ident"

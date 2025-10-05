@@ -1,12 +1,12 @@
 use proc_macro::TokenStream;
 use std::collections::HashSet;
-use ringhopper_definitions::{load_all_definitions, Bitfield, EngineCompressionType, Enum, FieldCount, FieldObject, NamedObject, ParsedDefinitions, SizeableObject, Struct, StructField, StructFieldType};
+use ringhopper_definitions::{load_all_definitions, Bitfield, EngineCompressionType, Enum, FieldCount, FieldObject, NamedObject, Nullability, ParsedDefinitions, SizeableObject, Struct, StructField, StructFieldType, SupportedEngines};
 use std::fmt::write;
 use std::fmt::Write;
 
 #[proc_macro]
 pub fn generate_tag_group_enum(_: TokenStream) -> TokenStream {
-    let definitions = ringhopper_definitions::load_all_definitions();
+    let definitions = load_all_definitions();
 
     let mut q = String::with_capacity(1024 * 1024 * 2);
 
@@ -85,6 +85,27 @@ pub fn generate_tag_group_enum(_: TokenStream) -> TokenStream {
     q += "}\n";
     q += "}\n";
 
+
+    // supports_engine impl
+    q += "/// Return true if the tag group supports the given engine.\n";
+    q += "pub fn supports_engine(self, engine: &'static Engine) -> bool {\n";
+    q += "match self {\n";
+    for group in definitions.groups.values() {
+        match &group.supported_engines {
+            SupportedEngines::AllEngines => {},
+            SupportedEngines::SomeEngines(e) => {
+                write(&mut q, format_args!("TagGroup::{} => [", group.name_rust_enum)).unwrap();
+                for i in e.iter() {
+                    write(&mut q, format_args!("\"{i}\",")).unwrap();
+                }
+                q += "].contains(&engine.name),\n";
+            }
+        }
+    }
+    q += "_ => true,\n";
+    q += "}\n";
+    q += "}\n";
+
     q += "}\n";
 
     // Display impl
@@ -107,12 +128,22 @@ pub fn generate_tag_group_enum(_: TokenStream) -> TokenStream {
     q += "}\n";
     q += "}\n";
 
+    q += "/// Extract the tag data.\n";
+    q += "pub(crate) fn extract_tag_from_cache_file(cache_file: &ParsedCacheFile, tag_index: usize, parameters: Parameters) -> Result<alloc::boxed::Box<dyn EditableTag>, WriteableDataError> {\n";
+    q += "todo!(\"add extract_tag_from_cache_file code\")\n";
+    q += "}\n";
+
     q.parse().expect("failed to parse generate_tag_group_enum result")
+}
+
+struct ReflexiveIndex {
+    reflexive_struct: String,
+    reflexive_reflexive_rust: String
 }
 
 #[proc_macro]
 pub fn generate_tag_data_defs(_: TokenStream) -> TokenStream {
-    let definitions = ringhopper_definitions::load_all_definitions();
+    let definitions = load_all_definitions();
 
     let all_modules_needed_set: HashSet<&str> = definitions
         .objects
@@ -123,6 +154,9 @@ pub fn generate_tag_data_defs(_: TokenStream) -> TokenStream {
     let mut all_modules_needed_vec: Vec<&str> = Vec::with_capacity(all_modules_needed_set.len());
     all_modules_needed_vec.extend(all_modules_needed_set);
     all_modules_needed_vec.dedup();
+
+    let mut tag_dependency_groups: Vec<Vec<String>> = Vec::with_capacity(128);
+    let mut tag_reflexive_indices: Vec<ReflexiveIndex> = Vec::with_capacity(1024);
 
     let mut q = String::with_capacity(1024 * 1024 * 32);
     for file in &all_modules_needed_vec {
@@ -140,7 +174,7 @@ pub fn generate_tag_data_defs(_: TokenStream) -> TokenStream {
             }
 
             match i {
-                NamedObject::Struct(s) => generate_struct(&mut q, s, definitions),
+                NamedObject::Struct(s) => generate_struct(&mut q, &mut tag_dependency_groups, &mut tag_reflexive_indices, s, definitions),
                 NamedObject::Bitfield(b) => generate_bitfield(&mut q, b),
                 NamedObject::Enum(e) => generate_enum(&mut q, e)
             }
@@ -150,6 +184,29 @@ pub fn generate_tag_data_defs(_: TokenStream) -> TokenStream {
 
         write(&mut q, format_args!("use {safe_name}::*;\n")).unwrap();
     }
+
+    q += "pub(crate) const TAG_REFERENCE_GROUPS: &[&[TagGroup]] = &[\n";
+    for i in tag_dependency_groups {
+        q += "&[";
+        for j in i {
+            q += "TagGroup::";
+            q += &definitions.groups[&j].name_rust_enum;
+            q += ",";
+        }
+        q += "],\n";
+    }
+    q += "];\n";
+
+    q += "pub(crate) const REFLEXIVE_INDICES: &[(&str, &str)] = &[\n";
+    for i in tag_reflexive_indices {
+        q += "(\"";
+        q += &i.reflexive_reflexive_rust;
+        q += "\", ";
+        q += "\"";
+        q += &i.reflexive_struct;
+        q += "\"),";
+    }
+    q += "];\n";
 
     q.parse().expect("failed to parse generate_tag_structs result")
 }
@@ -199,7 +256,7 @@ fn generate_enum(q: &mut String, e: &Enum) {
         *q += "=> ";
         write(q, format_args!("Ok(Self::{field_name}),\n")).unwrap();
     }
-    write(q, format_args!("_ => Err(\"invalid enum value for {name}\"),\n")).unwrap();
+    write(q, format_args!("_ => if parameters.strictness > Strictness::LastResort {{ Err(\"invalid enum value for {name}\") }} else {{ Ok(Default::default()) }},\n")).unwrap();
     *q += "}\n";
     *q += "}\n";
 
@@ -209,50 +266,106 @@ fn generate_enum(q: &mut String, e: &Enum) {
     *q += "}\n";
     *q += "}\n";
 
+    writeln!(q, "impl SimpleWriteableData for Option<{name}> {{\n").unwrap();
+    *q += "#[inline]\n";
+    *q += "fn length() -> usize { 2 }\n";
+
+    *q += "#[inline]\n";
+    *q += "fn read_tag_data_simple<B: ByteOrder>(from: &[u8], parameters: Parameters) -> Result<Self, &'static str> {\n";
+    *q += "match u16::read_tag_data_simple::<B>(from, parameters)? {\n";
+    *q += "0xFFFF => Ok(None),\n";
+    writeln!(q, "_ => Ok(Some({name}::read_tag_data_simple::<B>(from, parameters)?))").unwrap();
+    *q += "}\n";
+    *q += "}\n";
+
+    *q += "#[inline]\n";
+    *q += "fn write_tag_data_simple<B: ByteOrder>(&self, to: &mut [u8], parameters: Parameters) {\n";
+    *q += "match self { Some(n) => n.write_tag_data_simple::<B>(to, parameters), None => 0xFFFFu16.write_tag_data_simple::<B>(to, parameters) };\n";
+    *q += "}\n";
+
+    *q += "}\n";
+
+
     write(q, format_args!("impl EditableTagField for {name} {{\n")).unwrap();
+    *q += "#[inline] fn get_field_type_name(&self) -> &'static str { \"";
+    *q += name.as_str();
+    *q += "\" }\n";
     *q += "#[inline] fn get_enum(&self) -> Option<&dyn EditableEnumTagField> { Some(self) }\n";
     *q += "#[inline] fn get_enum_mut(&mut self) -> Option<&mut dyn EditableEnumTagField> { Some(self) }\n";
     *q += "}\n";
 
-    write(q, format_args!("impl EditableEnumTagField for {name} {{\n")).unwrap();
 
-    let mut get_value = String::with_capacity(1024 * 64);
-    let mut set_value = String::with_capacity(1024 * 64);
+    write(q, format_args!("impl EditableTagField for Option<{name}> {{\n")).unwrap();
+    *q += "#[inline] fn get_field_type_name(&self) -> &'static str { \"";
+    *q += name.as_str();
+    *q += "\" }\n";
+    *q += "#[inline] fn get_enum(&self) -> Option<&dyn EditableEnumTagField> { Some(self) }\n";
+    *q += "#[inline] fn get_enum_mut(&mut self) -> Option<&mut dyn EditableEnumTagField> { Some(self) }\n";
+    *q += "}\n";
 
-    *q += "#[inline]\n";
-    *q += "fn values(&self) -> &'static [&'static str] { &[\n";
+    fn write_enum_editable_tag_field_impl(q: &mut String, e: &Enum, nullable: bool) {
+        let mut get_value = String::with_capacity(1024 * 64);
+        let mut set_value = String::with_capacity(1024 * 64);
+        let enum_name = &e.name;
 
-    for i in &e.options {
-        if i.flags.exclude {
-            continue
+        *q += "#[inline]\n";
+        *q += "fn values(&self) -> &'static [&'static str] { &[\n";
+
+        for i in &e.options {
+            if i.flags.exclude {
+                continue
+            }
+
+            let name = &i.name_rust_enum;
+            let mut name_without_underscore = i.name_rust_field.clone();
+            while name_without_underscore.starts_with("_") {
+                name_without_underscore.remove(0);
+            }
+
+            write(q, format_args!("\"{name_without_underscore}\",\n")).unwrap();
+
+            if nullable {
+                get_value += "None => \"none\",\n";
+                set_value += "\"none\" => { *self = None },\n";
+            }
+
+            if nullable {
+                write(&mut get_value, format_args!("Some({enum_name}::{name}) => \"{name_without_underscore}\",")).unwrap();
+                write(&mut set_value, format_args!("\"{name_without_underscore}\" => {{ *self = Some({enum_name}::{name}) }},")).unwrap();
+            }
+            else {
+                write(&mut get_value, format_args!("Self::{name} => \"{name_without_underscore}\",")).unwrap();
+                write(&mut set_value, format_args!("\"{name_without_underscore}\" => {{ *self = Self::{name} }},")).unwrap();
+            }
         }
 
-        let name = &i.name_rust_enum;
-        let mut name_without_underscore = i.name_rust_field.clone();
-        while name_without_underscore.starts_with("_") {
-            name_without_underscore.remove(0);
-        }
+        *q += "] }\n";
 
-        write(q, format_args!("\"{name_without_underscore}\",\n")).unwrap();
-        write(&mut get_value, format_args!("Self::{name} => \"{name_without_underscore}\",")).unwrap();
-        write(&mut set_value, format_args!("\"{name_without_underscore}\" => {{ *self = Self::{name} }},")).unwrap();
+        *q += "fn get_value(&self) -> &'static str {\n";
+        *q += "match self {\n";
+        *q += &get_value;
+        *q += "}\n";
+        *q += "}\n";
+
+        *q += "fn set_value(&mut self, value: &str) -> Result<(), &'static str> {\n";
+        *q += "match value {\n";
+        *q += &set_value;
+        *q += "_ => return Err(\"unknown value\")\n";
+        *q += "}\n";
+        *q += "Ok(())\n";
+        *q += "}\n";
     }
 
-    *q += "] }\n";
-
-    *q += "fn get_value(&self) -> &'static str {\n";
-    *q += "match self {\n";
-    *q += &get_value;
-    *q += "}\n";
+    write(q, format_args!("impl EditableEnumTagField for {name} {{\n")).unwrap();
+    write_enum_editable_tag_field_impl(q, e, false);
     *q += "}\n";
 
-    *q += "fn set_value(&mut self, value: &str) -> Result<(), &'static str> {\n";
-    *q += "match value {\n";
-    *q += &set_value;
-    *q += "_ => return Err(\"unknown value\")\n";
+    write(q, format_args!("impl EditableEnumTagField for Option<{name}> {{\n")).unwrap();
+    write_enum_editable_tag_field_impl(q, e, true);
     *q += "}\n";
-    *q += "Ok(())\n";
-    *q += "}\n";
+
+    write(q, format_args!("impl core::fmt::Display for {name} {{\n")).unwrap();
+    *q += "#[inline] fn fmt(&self, fmt: &mut core::fmt::Formatter<'_>) -> core::fmt::Result { fmt.write_str(self.get_value()) }\n";
     *q += "}\n";
 }
 
@@ -321,6 +434,9 @@ fn generate_bitfield(q: &mut String, b: &Bitfield) {
     *q += "}\n";
     *q += "}\n";
     write(q, format_args!("impl EditableTagField for {name} {{")).unwrap();
+    *q += "#[inline] fn get_field_type_name(&self) -> &'static str { \"";
+    *q += name.as_str();
+    *q += "\" }\n";
     *q += "#[inline] fn get_composite(&self) -> Option<&dyn EditableCompositeTagField> { Some(self) }\n";
     *q += "#[inline] fn get_composite_mut(&mut self) -> Option<&mut dyn EditableCompositeTagField> { Some(self) }\n";
     *q += "}\n";
@@ -377,7 +493,7 @@ fn generate_bitfield(q: &mut String, b: &Bitfield) {
     *q += "}\n";
 }
 
-fn generate_struct(q: &mut String, s: &Struct, definitions: &ParsedDefinitions) {
+fn generate_struct(q: &mut String, tag_dependency_groups: &mut Vec<Vec<String>>, reflexive_indices: &mut Vec<ReflexiveIndex>, s: &Struct, definitions: &ParsedDefinitions) {
     let name = &s.name;
 
     *q += "#[derive(Clone, PartialEq, Debug, Default)]\n";
@@ -395,17 +511,37 @@ fn generate_struct(q: &mut String, s: &Struct, definitions: &ParsedDefinitions) 
                 let buffer;
 
                 let value_name = match object {
-                    FieldObject::NamedObject(n) => n.as_str(),
+                    FieldObject::NamedObject(n) => {
+                        match field.nullability {
+                            Nullability::NonNull => n.as_str(),
+                            Nullability::Nullable => {
+                                buffer = format!("Option<{n}>");
+                                buffer.as_str()
+                            }
+                        }
+                    },
                     FieldObject::Reflexive(r) => {
                         buffer = format!("Reflexive<{r}>");
                         buffer.as_str()
                     },
-                    FieldObject::TagReference { .. } => "TagReference",
+                    FieldObject::TagReference { allowed_groups } => {
+                        let index = match tag_dependency_groups.iter().position(|i| i == allowed_groups) {
+                            Some(i) => i,
+                            None => {
+                                let l = tag_dependency_groups.len();
+                                tag_dependency_groups.push(allowed_groups.to_owned());
+                                l
+                            }
+                        };
+
+                        buffer = format!("TagReference<{index}>");
+                        buffer.as_str()
+                    },
                     FieldObject::TagGroup => "TagGroup",
-                    FieldObject::Data => "Vec<u8>",
-                    FieldObject::BSPVertexData => "Vec<u8>",
+                    FieldObject::Data => "CombArc<Vec<u8>>",
+                    FieldObject::BSPVertexData => "CombArc<Vec<u8>>",
                     FieldObject::UTF16String => "String",
-                    FieldObject::FileData => "Vec<u8>",
+                    FieldObject::FileData => "CombArc<Vec<u8>>",
                     FieldObject::F32 => "f32",
                     FieldObject::U8 => "u8",
                     FieldObject::U16 => "u16",
@@ -416,6 +552,24 @@ fn generate_struct(q: &mut String, s: &Struct, definitions: &ParsedDefinitions) 
                     FieldObject::TagID => "TagID",
                     FieldObject::ID => "u32",
                     FieldObject::Index => "Index",
+                    FieldObject::ReflexiveIndex { reflexive_name_rust, struct_name, .. } => {
+                        match reflexive_indices.iter().position(|i| &i.reflexive_struct == struct_name && &i.reflexive_reflexive_rust == reflexive_name_rust) {
+                            Some(p) => {
+                                buffer = format!("ReflexiveIndex<{p}>");
+                                buffer.as_str()
+                            }
+                            None => {
+                                let p = reflexive_indices.len();
+                                reflexive_indices.push(ReflexiveIndex {
+                                    reflexive_struct: struct_name.to_owned(),
+                                    reflexive_reflexive_rust: reflexive_name_rust.to_owned()
+                                });
+                                buffer = format!("ReflexiveIndex<{p}>");
+                                buffer.as_str()
+                            }
+                        }
+
+                    }
                     FieldObject::Angle => "Angle",
                     FieldObject::Address => "Address",
                     FieldObject::Vector2D => "Vector2D",
@@ -428,10 +582,12 @@ fn generate_struct(q: &mut String, s: &Struct, definitions: &ParsedDefinitions) 
                     FieldObject::Plane3D => "Plane3D",
                     FieldObject::Euler2D => "Euler2D",
                     FieldObject::Euler3D => "Euler3D",
+                    FieldObject::Rectangle3D => "Rectangle3D",
                     FieldObject::Rectangle => "Rectangle",
                     FieldObject::Quaternion => "Quaternion",
                     FieldObject::Matrix2x3 => "Matrix2x3",
                     FieldObject::Matrix3x3 => "Matrix3x3",
+                    FieldObject::Matrix4x3 => "Matrix4x3",
                     FieldObject::ColorRGB => "ColorRGB",
                     FieldObject::ColorARGB => "ColorARGB",
                     FieldObject::Pixel32 => "Pixel32",
@@ -476,7 +632,20 @@ fn generate_struct(q: &mut String, s: &Struct, definitions: &ParsedDefinitions) 
                         conditionally_read = true;
                     }
 
-                    write(read_data, format_args!("SimpleWriteableData::read_tag_data_simple::<{endianness}>(&from[{offset_start}..{offset_end}], parameters)?")).unwrap();
+                    if field.flags.shifted_by_one {
+                        *read_data += "match parameters.data_type {\n";
+                        writeln!(read_data, "DataType::TagFile => SimpleWriteableData::read_tag_data_simple::<{endianness}>(&from[{offset_start}..{offset_end}], parameters)?,").unwrap();
+
+                        *read_data += "DataType::CacheFile => {\n";
+                        writeln!(read_data, "let b = u16::read_tag_data_simple::<{endianness}>(&from[{offset_start}..{offset_end}], parameters)?.to_le_bytes();").unwrap();
+                        *read_data += "SimpleWriteableData::read_tag_data_simple::<byteorder::LittleEndian>(b.as_slice(), parameters)?\n";
+                        *read_data += "}\n";
+
+                        *read_data += "}";
+                    }
+                    else {
+                        writeln!(read_data, "SimpleWriteableData::read_tag_data_simple::<{endianness}>(&from[{offset_start}..{offset_end}], parameters)?").unwrap();
+                    }
 
                     if conditionally_read {
                         *read_data += "} else { Default::default() }";
@@ -496,7 +665,16 @@ fn generate_struct(q: &mut String, s: &Struct, definitions: &ParsedDefinitions) 
                         conditionally_written = true;
                     }
 
-                    write(write_data, format_args!("self.{field_name}.write_tag_data_simple::<{endianness}>(&mut to[{offset_start}..{offset_end}], parameters);")).unwrap();
+                    if field.flags.shifted_by_one {
+                        *write_data += "match parameters.data_type {\n";
+                        writeln!(write_data, "DataType::TagFile => self.{field_name}.write_tag_data_simple::<{endianness}>(&mut to[{offset_start}..{offset_end}], parameters),").unwrap();
+                        writeln!(write_data, "DataType::CacheFile => (self.{field_name} as u16).wrapping_sub(1).write_tag_data_simple::<{endianness}>(&mut to[{offset_start}..{offset_end}], parameters),").unwrap();
+                        *write_data += "}";
+                    }
+                    else {
+                        writeln!(write_data, "self.{field_name}.write_tag_data_simple::<{endianness}>(&mut to[{offset_start}..{offset_end}], parameters);").unwrap();
+                    }
+
 
                     if conditionally_written {
                         *write_data += " }";
@@ -531,6 +709,8 @@ fn generate_struct(q: &mut String, s: &Struct, definitions: &ParsedDefinitions) 
                 |read_data, field, offset_start, _offset_end, endianness| {
                     let field_name = &field.name_rust_field;
                     write(read_data, format_args!("{field_name}: ")).unwrap();
+
+                    assert!(!field.flags.shifted_by_one, "can't do shifted by one in non-const");
 
                     let conditionally_read = field.flags.cache_only || field.flags.non_cached;
 
@@ -597,6 +777,9 @@ fn generate_struct(q: &mut String, s: &Struct, definitions: &ParsedDefinitions) 
     }
 
     write(q, format_args!("impl EditableTagField for {name} {{")).unwrap();
+    *q += "#[inline] fn get_field_type_name(&self) -> &'static str { \"";
+    *q += name.as_str();
+    *q += "\" }\n";
     *q += "#[inline] fn get_composite(&self) -> Option<&dyn EditableCompositeTagField> { Some(self) }\n";
     *q += "#[inline] fn get_composite_mut(&mut self) -> Option<&mut dyn EditableCompositeTagField> { Some(self) }\n";
     *q += "}\n";
@@ -675,6 +858,40 @@ fn generate_struct(q: &mut String, s: &Struct, definitions: &ParsedDefinitions) 
             write(q, format_args!("#[inline] fn tag_group(&self) -> TagGroup {{ TagGroup::{} }}", i.name_rust_enum)).unwrap();
             *q += "#[inline] fn clone_to_boxed_tag(&self) -> Box<dyn EditableTag> { Box::new(self.clone()) }\n";
             *q += "#[inline] fn write_tag_to_vec(&self, parameters: Parameters) -> Result<Vec<u8>, WriteableDataError> { write_tag_file::<Self>(self, parameters) }\n";
+
+            if let Some(supergroup_name) = i.supergroup.as_ref() {
+                let supergroup = definitions.groups.get(supergroup_name).expect("tried to get supergroup");
+
+                let mut path = String::with_capacity(128);
+                let mut first = s.fields.first();
+
+                let mut infinite_loop_detector = 0;
+                loop {
+                    let f = first.expect("can't find supergroup");
+
+                    path += ".";
+                    path += f.name_rust_field.as_ref();
+
+                    let StructFieldType::Object(FieldObject::NamedObject(o)) = &f.field_type else { panic!("first object in thing with supergroup is not a named object") };
+
+                    if &supergroup.struct_name == o {
+                        break;
+                    }
+
+                    let NamedObject::Struct(superstruct) = &definitions.objects[o] else { panic!("{o} is named object struct when looking for supergroups") };
+                    first = superstruct.fields.first();
+
+                    infinite_loop_detector += 1;
+                    if infinite_loop_detector > 256 {
+                        panic!("infinite loop when getting supergroup {supergroup_name}!")
+                    }
+                }
+
+
+                write(q, format_args!("#[inline] fn get_super(&self) -> Option<&dyn EditableTag> {{ Some(&self{path}) }}\n")).unwrap();
+                write(q, format_args!("#[inline] fn get_super_mut(&mut self) -> Option<&mut dyn EditableTag> {{ Some(&mut self{path}) }}\n")).unwrap();
+            }
+
             *q += "}\n";
             break
         }
@@ -796,6 +1013,14 @@ pub fn generate_engine_defs(_: TokenStream) -> TokenStream {
 
             r
         }).unwrap_or("None".to_owned())).unwrap();
+
+        q += "grenade_limits: EngineGrenadeLimits {\n";
+        writeln!(&mut q, "singleplayer: {}..={},", i.grenades.singleplayer.start(), i.grenades.singleplayer.end()).unwrap();
+        writeln!(&mut q, "multiplayer: {}..={},", i.grenades.multiplayer.start(), i.grenades.multiplayer.end()).unwrap();
+        writeln!(&mut q, "user_interface: {}..={}", i.grenades.user_interface.start(), i.grenades.user_interface.end()).unwrap();
+        q += "},\n";
+
+        writeln!(&mut q, "minimum_weapons: {},", i.minimum_weapons).unwrap();
 
         q += "required_tags: EngineRequiredTags {\n";
 

@@ -5,8 +5,8 @@ use alloc::boxed::Box;
 use alloc::borrow::ToOwned;
 use alloc::vec::Vec;
 use alloc::sync::Arc;
-use spin::Mutex;
-use spin::rwlock::RwLock;
+use ringhopper_structs::ext::spin::Mutex;
+use ringhopper_structs::ext::spin::rwlock::RwLock;
 
 /// Determines the writing behavior of [`CachingTagset`].
 #[derive(Copy, Clone, PartialEq)]

@@ -28,6 +28,7 @@ pub trait SimpleWriteableData: Copy + Clone + Sized {
 
 #[derive(Copy, Clone, PartialEq, PartialOrd, Debug)]
 pub enum Strictness {
+    LastResort,
     Relaxed,
     Strict
 }
@@ -40,11 +41,19 @@ pub enum ForceBaseMemoryAddress {
 }
 
 #[derive(Copy, Clone, PartialEq, Debug)]
+pub enum DataType {
+    TagFile,
+    CacheFile
+}
+
+#[derive(Copy, Clone, PartialEq, Debug)]
 pub struct Parameters {
     pub strictness: Strictness,
     pub base_memory_address: Option<ForceBaseMemoryAddress>,
     pub cache_only_fields: bool,
-    pub tag_only_fields: bool
+    pub tag_only_fields: bool,
+    pub undefault_on_extract: bool,
+    pub data_type: DataType
 }
 
 impl Parameters {
@@ -53,7 +62,9 @@ impl Parameters {
         strictness: Strictness::Strict,
         tag_only_fields: true,
         cache_only_fields: false,
-        base_memory_address: None
+        base_memory_address: None,
+        undefault_on_extract: false,
+        data_type: DataType::TagFile
     };
 
     /// Default parameters for reading from cache files
@@ -61,7 +72,9 @@ impl Parameters {
         strictness: Strictness::Strict,
         tag_only_fields: false,
         cache_only_fields: true,
-        base_memory_address: None
+        base_memory_address: None,
+        undefault_on_extract: true,
+        data_type: DataType::CacheFile
     };
 }
 
@@ -111,7 +124,34 @@ long_io!(u16, read_u16, write_u16);
 long_io!(i16, read_i16, write_i16);
 long_io!(u32, read_u32, write_u32);
 long_io!(i32, read_i32, write_i32);
-long_io!(f32, read_f32, write_f32);
+
+impl SimpleWriteableData for f32 {
+    #[inline]
+    fn read_tag_data_simple<B: ByteOrder>(from: &[u8], parameters: Parameters) -> Result<Self, &'static str> {
+        let data = B::read_f32(from);
+
+        if data.is_nan() {
+            if parameters.strictness > Strictness::LastResort {
+                Err("Float is NaN (not-a-number)")
+            }
+            else {
+                Ok(0.0)
+            }
+        }
+        else {
+            Ok(data)
+        }
+    }
+    #[inline]
+    fn write_tag_data_simple<B: ByteOrder>(&self, to: &mut [u8], _parameters: Parameters) {
+        assert!(!self.is_nan(), "attempting to write a NaN value");
+        B::write_f32(to, *self)
+    }
+    #[inline]
+    fn length() -> usize {
+        size_of::<Self>()
+    }
+}
 
 impl SimpleWriteableData for TagGroup {
     #[inline]
@@ -172,25 +212,86 @@ macro_rules! io_ordered_primitive {
 io_ordered_primitive!(Vector2D, 4*2, x, y);
 io_ordered_primitive!(Vector3D, 4*3, x, y, z);
 io_ordered_primitive!(Vector4D, 4*4, x, y, z, w);
-io_ordered_primitive!(Quaternion, 4*4, x, y, z, w);
+io_ordered_primitive!(Quaternion, 4*4, vector, w);
 io_ordered_primitive!(Euler2D, 4*2, yaw, pitch);
 io_ordered_primitive!(Euler3D, 4*3, yaw, pitch, roll);
 io_ordered_primitive!(Plane2D, 4*2+4, vector, offset);
 io_ordered_primitive!(Plane3D, 4*3+4, vector, offset);
 io_ordered_primitive!(Angle, 4, 0);
 io_ordered_primitive!(CompressedFloat, 2, 0);
-io_ordered_primitive!(CompressedVector2D, 4, 0);
+io_ordered_primitive!(CompressedVector2D, 4, x, y);
 io_ordered_primitive!(CompressedVector3D, 4, 0);
 io_ordered_primitive!(Matrix2x3, Vector3D::length() * 2, forward, up);
 io_ordered_primitive!(Matrix3x3, Vector3D::length() * 3, forward, left, up);
-io_ordered_primitive!(Matrix4x3, Vector3D::length() * (3 + 1) + 4, scale, rotation, position);
+io_ordered_primitive!(Rectangle3D, Vector3D::length() * 2, x_from, x_to, y_from, y_to, z_from, z_to);
+io_ordered_primitive!(Matrix4x3, Vector3D::length() + Matrix3x3::length() + f32::length(), scale, rotation, position);
 io_ordered_primitive!(Rectangle, 2*4, top, left, bottom, right);
-io_ordered_primitive!(ColorRGB, 4*3, r, g, b);
-io_ordered_primitive!(ColorARGB, 4*4, a, color);
 io_ordered_primitive!(Vector2DInt, 4, x, y);
 io_ordered_primitive!(Pixel32, 4, 0);
 io_ordered_primitive!(Index, 2, 0);
 io_ordered_primitive!(Address, 4, 0);
+
+impl SimpleWriteableData for ColorRGB {
+    #[inline]
+    fn read_tag_data_simple<B: ByteOrder>(from: &[u8], parameters: Parameters) -> Result<Self, &'static str> {
+        let (r, gb) = from.split_at(4);
+        let (g, b) = gb.split_at(4);
+
+        let result = ColorRGB {
+            r: f32::read_tag_data_simple::<B>(r, parameters)?,
+            g: f32::read_tag_data_simple::<B>(g, parameters)?,
+            b: f32::read_tag_data_simple::<B>(b, parameters)?,
+        }.clamped();
+
+        debug_assert!(result.is_valid(), "read a non-clamped or NaN color despite clamping it {result:?}");
+
+        Ok(result)
+    }
+    #[inline]
+    fn write_tag_data_simple<B: ByteOrder>(&self, to: &mut [u8], parameters: Parameters) {
+        debug_assert!(self.is_valid(), "attempted to write a non-clamped or NaN color {self:?}");
+
+        let (r, gb) = to.split_at_mut(4);
+        let (g, b) = gb.split_at_mut(4);
+
+        self.r.write_tag_data_simple::<B>(r, parameters);
+        self.g.write_tag_data_simple::<B>(g, parameters);
+        self.b.write_tag_data_simple::<B>(b, parameters);
+    }
+    #[inline]
+    fn length() -> usize {
+        4*3
+    }
+}
+
+impl SimpleWriteableData for ColorARGB {
+    #[inline]
+    fn read_tag_data_simple<B: ByteOrder>(from: &[u8], parameters: Parameters) -> Result<Self, &'static str> {
+        let (a, rgb) = from.split_at(4);
+        let a = f32::read_tag_data_simple::<B>(a, parameters)?;
+        let rgb = ColorRGB::read_tag_data_simple::<B>(rgb, parameters)?;
+
+        let result = ColorARGB {
+            a, color: rgb
+        }.clamped();
+
+        debug_assert!(result.is_valid(), "read a non-clamped or NaN color despite clamping it {result:?}");
+
+        Ok(result)
+    }
+    #[inline]
+    fn write_tag_data_simple<B: ByteOrder>(&self, to: &mut [u8], parameters: Parameters) {
+        debug_assert!(self.is_valid(), "attempted to write a non-clamped or NaN color {self:?}");
+
+        let (a, rgb) = to.split_at_mut(4);
+        self.a.write_tag_data_simple::<B>(a, parameters);
+        self.color.write_tag_data_simple::<B>(rgb, parameters);
+    }
+    #[inline]
+    fn length() -> usize {
+        4 + 4*3
+    }
+}
 
 impl SimpleWriteableData for ScenarioScriptNodeValue {
     #[inline]
@@ -304,7 +405,7 @@ impl<T: SimpleWriteableData + Sized> SimpleWriteableData for Bounds<T> {
 #[derive(Copy, Clone, Default)]
 #[repr(C)]
 pub(crate) struct TagReferenceC {
-    pub group: TagGroup,
+    pub group: u32,
     pub path_pointer: Address,
     pub path_size: u32,
     pub tag_id: TagID

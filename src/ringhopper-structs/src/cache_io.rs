@@ -1,9 +1,9 @@
 use crate::definitions::engine::{Engine, EngineCompressionType};
 use crate::definitions::tag::cache::{CEAFlags, CacheFileHeader, CacheFileHeaderPCDemo, CacheFileTag, CacheFileTagDataHeader, CacheFileTagDataHeaderExternalModels, CacheFileTagDataHeaderInternalModels};
-use crate::definitions::tag::scenario::Scenario;
-use crate::definitions::tag::TagGroup;
-use crate::{Address, EditableTag, ForceBaseMemoryAddress, Parameters, SimpleWriteableData, TagPath, TagReference, WriteableData, WriteableDataError};
-use alloc::borrow::ToOwned;
+use crate::definitions::tag::scenario::{Scenario, ScenarioType};
+use crate::definitions::tag::{extract_tag_from_cache_file, TagGroup};
+use crate::{unpostprocess_tag, Address, EditableTag, ForceBaseMemoryAddress, Parameters, PostprocessState, PostprocessWarningType, SimpleWriteableData, TagPath, WriteableData, WriteableDataError};
+use alloc::borrow::{Cow, ToOwned};
 use alloc::boxed::Box;
 use alloc::collections::BTreeMap;
 use alloc::string::String;
@@ -14,8 +14,12 @@ use alloc::format;
 use byteorder::LittleEndian;
 use core::cell::UnsafeCell;
 use core::ffi::CStr;
+use core::fmt::Arguments;
+use spin::RwLock;
 use crate::compression::zlib_decompress;
+use crate::definitions::tag::globals::Globals;
 use crate::definitions::tag::scenario_structure_bsp::ScenarioStructureBSP;
+use crate::util::launder_reference_lifetime;
 
 #[derive(Clone, Debug)]
 #[expect(unused)]
@@ -31,6 +35,7 @@ pub struct ParsedCacheFile {
     engine: &'static Engine,
     base_memory_address: u32,
     tag_count: usize,
+    scenario_type: ScenarioType,
 
     scenario_tag_index: usize,
     scenario_tag_data: Option<Box<Scenario>>,
@@ -236,7 +241,8 @@ impl ParsedCacheFile {
             scenario_tag_index,
             sections,
             buffers,
-            tag_count
+            tag_count,
+            scenario_type: header.map_type,
         };
 
         let extracted_scenario_tag = cache_file.extract_tag(cache_file.scenario_tag_index, parameters)
@@ -247,56 +253,53 @@ impl ParsedCacheFile {
             .expect("scenario tag was not actually a scenario even though we checked this...");
 
         for (index, entry) in scenario_tag.structure_bsps.iter().enumerate() {
-            match &entry.structure_bsp {
-                TagReference::Unset(_) => {}
-                TagReference::Set(path) => {
-                    if path.group() != TagGroup::ScenarioStructureBSP {
-                        return Err(LoadCacheFileError::CorruptMap { description: format!("BSP #{index} is not a scenario_structure_bsp but a {}", path.group()) });
-                    }
-                    let info = cache_file
-                        .tag_path_to_info
-                        .get(path)
-                        .expect("should have worked...");
-
-                    // SAFETY: We're the only thing that can access this right now
-                    let section = unsafe { &mut *info.section.get() };
-                    let new_section = DataSectionType::BSP(index);
-                    *section = new_section;
-
-                    let bsp_start = entry.bsp_start as usize;
-                    let bsp_size = entry.bsp_size as usize;
-
-                    let Some(bsp_end) = bsp_start.checked_add(entry.bsp_size as usize) else {
-                        return Err(LoadCacheFileError::CorruptMap { description: format!("BSP #{index} overflows (0x{bsp_start:08X} + 0x{bsp_size:08X})") });
-                    };
-
-                    let bsp_range = bsp_start..bsp_end;
-                    let Some(bsp_data) = cache_file.get_cache_buffer().get(bsp_range.clone()) else {
-                        return Err(LoadCacheFileError::CorruptMap { description: format!("BSP #{index} is out-of-bounds for the cache file (0x{bsp_start:08X}..0x{bsp_end:08X})") });
-                    };
-
-                    let address_len = Address::length();
-                    if bsp_size < Address::length() {
-                        return Err(LoadCacheFileError::CorruptMap { description: format!("BSP #{index} has a bad size 0x{bsp_size:08X} (can't read the main BSP address)") });
-                    }
-
-                    let address = Address::read_tag_data_simple::<LittleEndian>(&bsp_data[0..address_len], Parameters::CACHE_FILES).expect("bsp address read fail!!!");
-                    let Some(offset) = address.0.checked_sub(entry.bsp_address).map(|i| i as usize) else {
-                        return Err(LoadCacheFileError::CorruptMap { description: format!("BSP #{index}'s address 0x{:08X} is out-of-bounds (left)", address.0) });
-                    };
-
-                    if bsp_data.get(offset..).and_then(|i| i.get(..ScenarioStructureBSP::base_length())).is_none() {
-                        return Err(LoadCacheFileError::CorruptMap { description: format!("BSP #{index}'s address 0x{:08X} is out-of-bounds (right)", address.0) });
-                    }
-
-                    cache_file.sections.insert(new_section, bsp_range);
+            if let Some(path) = entry.structure_bsp.get() {
+                if path.group() != TagGroup::ScenarioStructureBSP {
+                    return Err(LoadCacheFileError::CorruptMap { description: format!("BSP #{index} is not a scenario_structure_bsp but a {}", path.group()) });
                 }
+                let info = cache_file
+                    .tag_path_to_info
+                    .get(path)
+                    .expect("should have worked...");
+
+                // SAFETY: We're the only thing that can access this right now
+                let section = unsafe { &mut *info.section.get() };
+                let new_section = DataSectionType::BSP(index);
+                *section = new_section;
+
+                let bsp_start = entry.bsp_start as usize;
+                let bsp_size = entry.bsp_size as usize;
+
+                let Some(bsp_end) = bsp_start.checked_add(entry.bsp_size as usize) else {
+                    return Err(LoadCacheFileError::CorruptMap { description: format!("BSP #{index} overflows (0x{bsp_start:08X} + 0x{bsp_size:08X})") });
+                };
+
+                let bsp_range = bsp_start..bsp_end;
+                let Some(bsp_data) = cache_file.get_cache_buffer().get(bsp_range.clone()) else {
+                    return Err(LoadCacheFileError::CorruptMap { description: format!("BSP #{index} is out-of-bounds for the cache file (0x{bsp_start:08X}..0x{bsp_end:08X})") });
+                };
+
+                let address_len = Address::length();
+                if bsp_size < Address::length() {
+                    return Err(LoadCacheFileError::CorruptMap { description: format!("BSP #{index} has a bad size 0x{bsp_size:08X} (can't read the main BSP address)") });
+                }
+
+                let address = Address::read_tag_data_simple::<LittleEndian>(&bsp_data[0..address_len], Parameters::CACHE_FILES).expect("bsp address read fail!!!");
+                let Some(offset) = address.0.checked_sub(entry.bsp_address).map(|i| i as usize) else {
+                    return Err(LoadCacheFileError::CorruptMap { description: format!("BSP #{index}'s address 0x{:08X} is out-of-bounds (left)", address.0) });
+                };
+
+                if bsp_data.get(offset..).and_then(|i| i.get(..ScenarioStructureBSP::base_length())).is_none() {
+                    return Err(LoadCacheFileError::CorruptMap { description: format!("BSP #{index}'s address 0x{:08X} is out-of-bounds (right)", address.0) });
+                }
+
+                cache_file.sections.insert(new_section, bsp_range);
             }
         }
 
-        for i in &cache_file.tag_path_to_info {
-            if i.1.section() == DataSectionType::BSP(usize::MAX) {
-                return Err(LoadCacheFileError::CorruptMap { description: format!("BSP {} is not referenced by the scenario tag", i.0) });
+        for (path, info) in &cache_file.tag_path_to_info {
+            if info.section() == DataSectionType::BSP(usize::MAX) {
+                return Err(LoadCacheFileError::CorruptMap { description: format!("BSP {path} is not referenced by the scenario tag") });
             }
         }
 
@@ -356,13 +359,88 @@ impl ParsedCacheFile {
         self.tag_path_to_info.get(tag_path).map(|t| t.index)
     }
 
-    #[expect(unused)]
     pub fn extract_tag(&self, index: usize, parameters: Parameters) -> Result<Box<dyn EditableTag>, WriteableDataError> {
         if let Some(scenario) = self.scenario_tag_data.as_ref() && self.scenario_tag_index == index {
             return Ok(scenario.clone_to_boxed_tag());
         }
 
-        todo!("add extract_tag code")
+        let mut tag = extract_tag_from_cache_file(self, index, parameters)?;
+
+        let tag_path = self.tag_paths_ordered.get(index).cloned().flatten().expect("extract_tag: no tag path");
+
+        if parameters.undefault_on_extract {
+            struct TagExtractor9000<'a> {
+                map: &'a ParsedCacheFile,
+                parameters: Parameters,
+                cache: RwLock<BTreeMap<TagPath, Arc<dyn EditableTag>>>
+            }
+            impl<'a> PostprocessState for TagExtractor9000<'a> {
+                fn scenario_name(&self) -> &str {
+                    todo!()
+                }
+                fn scenario_tag(&self) -> &Scenario {
+                    todo!()
+                }
+                fn globals_tag(&self) -> &Globals {
+                    todo!()
+                }
+                fn tag_path(&self) -> &str {
+                    todo!()
+                }
+                fn jason_jones_singleplayer(&self) -> bool {
+                    todo!()
+                }
+                fn engine(&self) -> &'static Engine {
+                    self.map.engine
+                }
+                fn scenario_type(&self) -> ScenarioType {
+                    self.map.scenario_type
+                }
+                fn try_read_tag(&self, tag_path: &TagPath) -> Option<&dyn EditableTag> {
+                    if let Some(c) = self.cache.read().get(tag_path).cloned() {
+                        // SAFETY: The cache will outlast the postprocess function call
+                        return Some(unsafe { launder_reference_lifetime(Arc::as_ref(&c)) });
+                    }
+
+                    let Some(s) = self.map.tag_path_to_info.get(tag_path) else {
+                        panic!("tried to find {tag_path} but failed - this is a bug!")
+                    };
+
+                    let tag = self
+                        .map
+                        .extract_tag(s.index, self.parameters).ok()?;
+                    let tag: Arc<dyn EditableTag> = Arc::from(tag);
+
+                    self.cache
+                        .write()
+                        .insert(tag_path.to_owned(), tag.clone());
+
+                    // SAFETY: The cache will outlast the postprocess function call
+                    Some(unsafe { launder_reference_lifetime(Arc::as_ref(&tag)) })
+                }
+                fn update_postprocessed_tag(&mut self, _: &TagPath, _: Box<dyn EditableTag>) -> Result<(), &'static str> {
+                    panic!("Tag extractor cannot write tags back into the cache file... lol");
+                }
+
+                fn warn(&self, _: &TagPath, _: Arguments, _: PostprocessWarningType) {
+                    // TODO: silent for now
+                }
+            }
+
+            let tag = Box::as_mut(&mut tag);
+            let mut extractor = TagExtractor9000 {
+                map: self,
+                parameters,
+                cache: Default::default()
+            };
+
+            unpostprocess_tag(tag, &mut extractor, Arc::as_ref(&tag_path))
+                .map_err(|e| WriteableDataError::Other {
+                    description: Cow::Owned(format!("Unpostprocess error:\n{e}"))
+                })?;
+        }
+
+        Ok(tag)
     }
 
     #[inline]

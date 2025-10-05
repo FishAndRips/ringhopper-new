@@ -52,7 +52,9 @@ pub fn zlib_decompress(compressed_data: &[u8], output_decompressed_data: &mut [u
     }
 
     let err = unsafe { libz_rs_sys::inflateEnd(&mut inflate_stream) };
-    assert_eq!(err, libz_rs_sys::Z_OK);
+    if err != libz_rs_sys::Z_OK {
+        return Err(CompressionError(Cow::Owned(format!("Decompression finalization failed: got a zlib error {err}"))))
+    }
 
     Ok(inflate_stream.total_out as usize)
 }

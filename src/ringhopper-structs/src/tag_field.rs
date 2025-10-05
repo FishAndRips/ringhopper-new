@@ -5,14 +5,19 @@ use funnel_web::rectangle::Rectangle;
 use funnel_web::string::ASCIIString;
 use funnel_web::vector::*;
 use core::any::Any;
+use alloc::borrow::ToOwned;
 use core::ops::ControlFlow;
 use alloc::boxed::Box;
 use alloc::vec::Vec;
-use crate::{Address, Bounds, Parameters, Reflexive, ScenarioScriptNodeValue, TagReference, WriteableData, WriteableDataError};
+use core::mem::transmute;
+use combarc::CombArc;
+use crate::{Address, Bounds, Parameters, Reflexive, ScenarioScriptNodeValue, TagPath, TagReference, WriteableData, WriteableDataError};
 use crate::definitions::tag::TagGroup;
 use crate::util::{launder_reference_lifetime, launder_reference_lifetime_mut};
 
 pub trait EditableTagField: 'static + Any {
+    fn get_field_type_name(&self) -> &'static str;
+    
     fn get_composite(&self) -> Option<&dyn EditableCompositeTagField> {
         None
     }
@@ -39,6 +44,57 @@ pub trait EditableTagField: 'static + Any {
     }
     fn get_enum_mut(&mut self) -> Option<&mut dyn EditableEnumTagField> {
         None
+    }
+
+    fn get_reflexive_index(&self) -> Option<&dyn EditableReflexiveIndex> { None }
+    fn get_reflexive_index_mut(&mut self) -> Option<&mut dyn EditableReflexiveIndex> { None }
+
+    fn get_tag_reference(&self) -> Option<&dyn EditableTagReferenceField> {
+        None
+    }
+    fn get_tag_reference_mut(&mut self) -> Option<&mut dyn EditableTagReferenceField> {
+        None
+    }
+}
+
+impl<T: EditableTagField + Clone> EditableTagField for CombArc<T> {
+    #[inline]
+    fn get_field_type_name(&self) -> &'static str {
+        "Data"
+    }
+    fn get_composite(&self) -> Option<&dyn EditableCompositeTagField> {
+        T::get_composite(self)
+    }
+    fn get_composite_mut(&mut self) -> Option<&mut dyn EditableCompositeTagField> {
+        T::get_composite_mut(self)
+    }
+
+    fn get_indexed(&self) -> Option<&dyn EditableIndexedTagField> {
+        T::get_indexed(self)
+    }
+    fn get_indexed_mut(&mut self) -> Option<&mut dyn EditableIndexedTagField> {
+        T::get_indexed_mut(self)
+    }
+
+    fn get_field_data(&self) -> Option<&dyn EditableTagFieldData> {
+        T::get_field_data(self)
+    }
+    fn get_field_data_mut(&mut self) -> Option<&mut dyn EditableTagFieldData> {
+        T::get_field_data_mut(self)
+    }
+
+    fn get_enum(&self) -> Option<&dyn EditableEnumTagField> {
+        T::get_enum(self)
+    }
+    fn get_enum_mut(&mut self) -> Option<&mut dyn EditableEnumTagField> {
+        T::get_enum_mut(self)
+    }
+
+    fn get_tag_reference(&self) -> Option<&dyn EditableTagReferenceField> {
+        T::get_tag_reference(self)
+    }
+    fn get_tag_reference_mut(&mut self) -> Option<&mut dyn EditableTagReferenceField> {
+        T::get_tag_reference_mut(self)
     }
 }
 
@@ -77,6 +133,7 @@ pub trait EditableIndexedTagField: EditableTagField {
     fn remove_item(&mut self, item: usize) -> Result<(), &'static str>;
     fn swap_items(&mut self, a: usize, b: usize) -> Result<(), &'static str>;
     fn add_item(&mut self, at: usize) -> Result<(), &'static str>;
+    fn insert_item(&mut self, at: usize, item: &dyn EditableTagField) -> Result<(), &'static str>;
 }
 
 pub trait EditableEnumTagField: EditableTagField {
@@ -85,10 +142,30 @@ pub trait EditableEnumTagField: EditableTagField {
     fn set_value(&mut self, value: &str) -> Result<(), &'static str>;
 }
 
+pub trait EditableTagReferenceField: EditableTagFieldData {
+    fn get_allowed_tag_groups(&self) -> &'static [TagGroup];
+    fn get_tag(&self) -> Option<&TagPath>;
+    fn set_tag(&mut self, tag: TagPath) -> Result<(), &'static str>;
+    fn clear_tag(&mut self);
+}
+
 pub trait EditableTag: EditableCompositeTagField {
     fn tag_group(&self) -> TagGroup;
     fn clone_to_boxed_tag(&self) -> Box<dyn EditableTag>;
     fn write_tag_to_vec(&self, parameters: Parameters) -> Result<Vec<u8>, WriteableDataError>;
+    fn get_super(&self) -> Option<&dyn EditableTag> {
+        None
+    }
+    fn get_super_mut(&mut self) -> Option<&mut dyn EditableTag> {
+        None
+    }
+}
+
+pub trait EditableReflexiveIndex: EditableTagField {
+    fn get_index(&self) -> &Index;
+    fn get_index_mut(&mut self) -> &mut Index;
+    fn get_reflexive_name(&self) -> &'static str;
+    fn get_reflexive_struct(&self) -> &'static str;
 }
 
 impl dyn EditableTagField {
@@ -125,14 +202,117 @@ impl dyn EditableIndexedTagField {
     pub fn downcast_mut<T: EditableIndexedTagField>(&mut self) -> Option<&mut T> {
         <dyn Any>::downcast_mut(self as &mut dyn Any)
     }
+    pub fn iter(&'_ self) -> EditableIndexedTagFieldIterator<'_> {
+        self.into_iter()
+    }
+    pub fn iter_mut(&'_ mut self) -> EditableIndexedTagFieldIteratorMut<'_> {
+        self.into_iter()
+    }
+}
+
+impl<'a> IntoIterator for &'a dyn EditableIndexedTagField {
+    type Item = &'a dyn EditableTagField;
+    type IntoIter = EditableIndexedTagFieldIterator<'a>;
+
+    fn into_iter(self) -> Self::IntoIter {
+        EditableIndexedTagFieldIterator {
+            item: self,
+            start: 0,
+            end: self.item_count()
+        }
+    }
+}
+
+impl<'a> IntoIterator for &'a mut dyn EditableIndexedTagField {
+    type Item = &'a mut dyn EditableTagField;
+    type IntoIter = EditableIndexedTagFieldIteratorMut<'a>;
+
+    fn into_iter(self) -> Self::IntoIter {
+        EditableIndexedTagFieldIteratorMut {
+            end: self.item_count(),
+            item: self,
+            start: 0,
+        }
+    }
+}
+
+/// An iterator for [EditableIndexedTagField].
+pub struct EditableIndexedTagFieldIterator<'a> {
+    item: &'a dyn EditableIndexedTagField,
+    start: usize,
+    end: usize
+}
+
+impl<'a> Iterator for EditableIndexedTagFieldIterator<'a> {
+    type Item = &'a dyn EditableTagField;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        let item = self.item.get_item(self.start)?;
+        self.start = self.start + 1;
+        Some(item)
+    }
+}
+
+impl<'a> DoubleEndedIterator for EditableIndexedTagFieldIterator<'a> {
+    fn next_back(&mut self) -> Option<Self::Item> {
+        let end = self.end.checked_sub(1)?;
+        let item = self.item.get_item(end)?;
+        self.end = end;
+        Some(item)
+    }
+}
+
+/// An iterator for [EditableIndexedTagField] over mutable data.
+pub struct EditableIndexedTagFieldIteratorMut<'a> {
+    item: &'a mut dyn EditableIndexedTagField,
+    start: usize,
+    end: usize
+}
+
+impl<'a> Iterator for EditableIndexedTagFieldIteratorMut<'a> {
+    type Item = &'a mut dyn EditableTagField;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        // SAFETY: This 'static won't leave this function.
+        let table_flip = unsafe { transmute::<
+            &mut EditableIndexedTagFieldIteratorMut<'a>,
+            &'static mut EditableIndexedTagFieldIteratorMut<'static>
+        >(self) };
+
+        let item = table_flip.item.get_item_mut(self.start)?;
+        table_flip.start = table_flip.start + 1;
+        Some(item)
+    }
+}
+
+impl<'a> DoubleEndedIterator for EditableIndexedTagFieldIteratorMut<'a> {
+    fn next_back(&mut self) -> Option<Self::Item> {
+        // SAFETY: This 'static won't leave this function.
+        let table_flip = unsafe { transmute::<
+            &mut EditableIndexedTagFieldIteratorMut<'a>,
+            &'static mut EditableIndexedTagFieldIteratorMut<'static>
+        >(self) };
+
+        let end = table_flip.end.checked_sub(1)?;
+        let item = table_flip.item.get_item_mut(end)?;
+        table_flip.end = end;
+        Some(item)
+    }
 }
 
 impl dyn EditableTag {
     pub fn downcast_ref<T: EditableTag>(&self) -> Option<&T> {
         <dyn Any>::downcast_ref(self as &dyn Any)
+            .or_else(|| self.get_super().and_then(|s| s.downcast_ref()))
     }
     pub fn downcast_mut<T: EditableTag>(&mut self) -> Option<&mut T> {
-        <dyn Any>::downcast_mut(self as &mut dyn Any)
+        if let Some(s) = <dyn Any>::downcast_mut(self as &mut dyn Any) {
+            // SAFETY: Both lifetimes are going to be the same.
+            //
+            // We have to do this because, without it, `self` can't be borrowed again.
+            return Some(unsafe { launder_reference_lifetime_mut(s) })
+        }
+        self.get_super_mut().and_then(|s| s.downcast_mut())
     }
 }
 
@@ -141,6 +321,7 @@ pub enum TagFieldDataValue<'a> {
     Bool(bool),
     Float(f32),
     String(&'a str),
+    TagPath(Option<&'a TagPath>),
     Integer(i64)
 }
 
@@ -152,11 +333,19 @@ impl<'a> Display for TagFieldDataValue<'a> {
             Self::Float(q) => Display::fmt(q, f),
             Self::String(q) => Display::fmt(q, f),
             Self::Integer(q) => Display::fmt(q, f),
+            Self::TagPath(q) => match q {
+                Some(n) => Display::fmt(n, f),
+                None => f.write_str("null")
+            }
         }
     }
 }
 
 impl EditableTagField for ScenarioScriptNodeValue {
+    #[inline]
+    fn get_field_type_name(&self) -> &'static str {
+        "ScenarioScriptNodeValue"
+    }
     #[inline]
     fn get_field_data(&self) -> Option<&dyn EditableTagFieldData> {
         Some(&self.0)
@@ -168,6 +357,10 @@ impl EditableTagField for ScenarioScriptNodeValue {
 }
 
 impl<T: EditableTagField + Clone> EditableTagField for Bounds<T> {
+    #[inline]
+    fn get_field_type_name(&self) -> &'static str {
+        "Bounds"
+    }
     #[inline]
     fn get_composite(&self) -> Option<&dyn EditableCompositeTagField> {
         Some(self)
@@ -213,11 +406,30 @@ impl<T: EditableTagField + Clone> EditableCompositeTagField for Bounds<T> {
     }
 }
 
-impl EditableTagField for TagGroup {}
-impl EditableTagField for alloc::string::String {}
-impl EditableTagField for alloc::vec::Vec<u8> {}
+impl EditableTagField for TagGroup {
+    #[inline]
+    fn get_field_type_name(&self) -> &'static str {
+        "TagGroup"
+    }
+}
+impl EditableTagField for alloc::string::String {
+    #[inline]
+    fn get_field_type_name(&self) -> &'static str {
+        "UnicodeString"
+    }
+}
+impl EditableTagField for Vec<u8> {
+    #[inline]
+    fn get_field_type_name(&self) -> &'static str {
+        "Bytes"
+    }
+}
 
 impl EditableTagField for bool {
+    #[inline]
+    fn get_field_type_name(&self) -> &'static str {
+        "bool"
+    }
     #[inline]
     fn get_field_data(&self) -> Option<&dyn EditableTagFieldData> {
         Some(self)
@@ -247,6 +459,10 @@ impl EditableTagFieldData for bool {
 macro_rules! define_editable_tag_field_parseable {
     ($t:ty, $err:literal) => {
         impl EditableTagField for $t {
+            #[inline]
+            fn get_field_type_name(&self) -> &'static str {
+                stringify!($t)
+            }
             #[inline]
             fn get_field_data(&self) -> Option<&dyn EditableTagFieldData> {
                 Some(self)
@@ -279,6 +495,10 @@ define_editable_tag_field_parseable!(i32, "can't parse into i32");
 
 impl EditableTagField for f32 {
     #[inline]
+    fn get_field_type_name(&self) -> &'static str {
+        "f32"
+    }
+    #[inline]
     fn get_field_data(&self) -> Option<&dyn EditableTagFieldData> {
         Some(self)
     }
@@ -309,6 +529,10 @@ impl EditableTagFieldData for f32 {
 
 impl<const LEN: usize> EditableTagField for ASCIIString<LEN> {
     #[inline]
+    fn get_field_type_name(&self) -> &'static str {
+        "ASCIIString"
+    }
+    #[inline]
     fn get_field_data(&self) -> Option<&dyn EditableTagFieldData> {
         Some(self)
     }
@@ -333,6 +557,10 @@ impl<const LEN: usize> EditableTagFieldData for ASCIIString<LEN> {
 macro_rules! composite_tag_fields {
     ($type:ty, $($vals:tt), *) => {
         impl EditableTagField for $type {
+            #[inline]
+            fn get_field_type_name(&self) -> &'static str {
+                stringify!($type)
+            }
             #[inline]
             fn get_composite(&self) -> Option<&dyn EditableCompositeTagField> {
                 Some(self)
@@ -375,7 +603,7 @@ macro_rules! composite_tag_fields {
 composite_tag_fields!(Vector2D, x, y);
 composite_tag_fields!(Vector3D, x, y, z);
 composite_tag_fields!(Vector4D, x, y, z, w);
-composite_tag_fields!(Quaternion, x, y, z, w);
+composite_tag_fields!(Quaternion, vector, w);
 composite_tag_fields!(Euler2D, yaw, pitch);
 composite_tag_fields!(Euler3D, yaw, pitch, roll);
 composite_tag_fields!(Plane2D, vector, offset);
@@ -384,14 +612,86 @@ composite_tag_fields!(Matrix2x3, forward, up);
 composite_tag_fields!(Matrix3x3, forward, left, up);
 composite_tag_fields!(Matrix4x3, scale, rotation, position);
 composite_tag_fields!(Rectangle, top, left, bottom, right);
+composite_tag_fields!(Vector2DInt, x, y);
 composite_tag_fields!(ColorRGB, r, g, b);
 composite_tag_fields!(ColorARGB, a, color);
-composite_tag_fields!(Vector2DInt, x, y);
+composite_tag_fields!(Rectangle3D, x_from, x_to, y_from, y_to, z_from, z_to);
 
-impl<const SALT: u16> EditableTagField for ID<SALT> {}
+impl<const SALT: u16> EditableTagField for ID<SALT> {
+    #[inline]
+    fn get_field_type_name(&self) -> &'static str {
+        "ID"
+    }
+}
 
-impl EditableTagField for TagReference {}
-impl<T: EditableTagField + WriteableData + Default> EditableTagField for Reflexive<T> {
+impl<const INTERNAL: usize> EditableTagField for TagReference<INTERNAL> {
+    #[inline]
+    fn get_field_type_name(&self) -> &'static str {
+        "TagReference"
+    }
+    #[inline]
+    fn get_field_data(&self) -> Option<&dyn EditableTagFieldData> {
+        Some(self)
+    }
+
+    #[inline]
+    fn get_field_data_mut(&mut self) -> Option<&mut dyn EditableTagFieldData> {
+        Some(self)
+    }
+
+    #[inline]
+    fn get_tag_reference(&self) -> Option<&dyn EditableTagReferenceField> {
+        Some(self)
+    }
+
+    #[inline]
+    fn get_tag_reference_mut(&mut self) -> Option<&mut dyn EditableTagReferenceField> {
+        Some(self)
+    }
+}
+
+impl<const INTERNAL: usize> EditableTagFieldData for TagReference<INTERNAL> {
+    fn get_value(&self) -> TagFieldDataValue<'_> {
+        TagFieldDataValue::TagPath(self.get())
+    }
+    fn set_value(&mut self, value: &str) -> Result<(), &'static str> {
+        if value == "" || value == "null" {
+            self.clear();
+            Ok(())
+        }
+        else {
+            let tag_path = TagPath::from_path_with_extension(value)
+                .ok()
+                .ok_or("invalid tag path")?;
+            self.set(tag_path)
+        }
+    }
+}
+
+impl<const INTERNAL: usize> EditableTagReferenceField for TagReference<INTERNAL> {
+    #[inline]
+    fn get_allowed_tag_groups(&self) -> &'static [TagGroup] {
+        Self::allowed_tag_groups()
+    }
+    #[inline]
+    fn get_tag(&self) -> Option<&TagPath> {
+        self.get()
+    }
+    #[inline]
+    fn set_tag(&mut self, tag: TagPath) -> Result<(), &'static str> {
+        self.set(tag)
+    }
+    #[inline]
+    fn clear_tag(&mut self) {
+        self.clear()
+    }
+}
+
+impl<T: EditableTagField + WriteableData + Clone + Default> EditableTagField for Reflexive<T> {
+    #[inline]
+    fn get_field_type_name(&self) -> &'static str {
+        "Reflexive"
+    }
     fn get_indexed(&self) -> Option<&dyn EditableIndexedTagField> {
         Some(self)
     }
@@ -399,7 +699,7 @@ impl<T: EditableTagField + WriteableData + Default> EditableTagField for Reflexi
         Some(self)
     }
 }
-impl<T: EditableTagField + WriteableData + Default> EditableIndexedTagField for Reflexive<T> {
+impl<T: EditableTagField + WriteableData + Clone + Default> EditableIndexedTagField for Reflexive<T> {
     fn item_count(&self) -> usize {
         self.len()
     }
@@ -436,14 +736,48 @@ impl<T: EditableTagField + WriteableData + Default> EditableIndexedTagField for 
         self.insert(at, T::default());
         Ok(())
     }
+    fn insert_item(&mut self, at: usize, item: &dyn EditableTagField) -> Result<(), &'static str> {
+        if at > self.len() {
+            return Err("out of bounds index")
+        };
+        let Some(t) = item.downcast_ref::<T>() else {
+            return Err("item does not match type")
+        };
+        self.insert(at, t.to_owned());
+        Ok(())
+    }
 }
 
-impl EditableTagField for CompressedFloat {}
-impl EditableTagField for CompressedVector2D {}
-impl EditableTagField for CompressedVector3D {}
+impl EditableTagField for CompressedFloat {
+    #[inline]
+    fn get_field_type_name(&self) -> &'static str {
+        "CompressedFloat"
+    }
+}
+impl EditableTagField for CompressedVector2D {
+    #[inline]
+    fn get_field_type_name(&self) -> &'static str {
+        "CompressedVector2D"
+    }
+}
+impl EditableTagField for CompressedVector3D {
+    #[inline]
+    fn get_field_type_name(&self) -> &'static str {
+        "CompressedVector3D"
+    }
+}
 
-impl EditableTagField for Pixel32 {}
+impl EditableTagField for Pixel32 {
+    #[inline]
+    fn get_field_type_name(&self) -> &'static str {
+        "Pixel32"
+    }
+}
 impl EditableTagField for Angle {
+    #[inline]
+    fn get_field_type_name(&self) -> &'static str {
+        "Angle"
+    }
     #[inline]
     fn get_field_data(&self) -> Option<&dyn EditableTagFieldData> {
         Some(self)
@@ -488,6 +822,10 @@ impl EditableTagFieldData for Angle {
 
 impl EditableTagField for Index {
     #[inline]
+    fn get_field_type_name(&self) -> &'static str {
+        "Index"
+    }
+    #[inline]
     fn get_field_data(&self) -> Option<&dyn EditableTagFieldData> {
         Some(self)
     }
@@ -511,6 +849,10 @@ impl EditableTagFieldData for Index {
 
 impl EditableTagField for Address {
     #[inline]
+    fn get_field_type_name(&self) -> &'static str {
+        "Address"
+    }
+    #[inline]
     fn get_field_data(&self) -> Option<&dyn EditableTagFieldData> {
         Some(self)
     }
@@ -525,6 +867,10 @@ impl EditableTagFieldData for Address {
 }
 
 impl<T: EditableTagField, const LEN: usize> EditableTagField for [T; LEN] {
+    #[inline]
+    fn get_field_type_name(&self) -> &'static str {
+        "Array"
+    }
     #[inline]
     fn get_indexed(&self) -> Option<&dyn EditableIndexedTagField> {
         Some(self)
@@ -570,6 +916,11 @@ impl<T: EditableTagField, const LEN: usize> EditableIndexedTagField for [T; LEN]
     #[inline]
     fn add_item(&mut self, _at: usize) -> Result<(), &'static str> {
         Err("array is fixed length; cannot add items")
+    }
+
+    #[inline]
+    fn insert_item(&mut self, _at: usize, _item: &dyn EditableTagField) -> Result<(), &'static str> {
+        Err("array is fixed length; cannot insert items")
     }
 }
 
@@ -623,7 +974,7 @@ pub fn $name<'a, 'b, E, F: FnMut($typing) -> ControlFlow<E, ()>>(field: $typing,
                     for i in 0..count {
                         let item = unsafe { $launder(indexable) }
                             .$get_item(i)
-                            .expect("failed to get item from index (wildcard); this is a bug");
+                            .expect("failed to get item from index (wildcard)");
                         inner(item, remaining_path, function)?;
                     }
                 }
@@ -664,7 +1015,7 @@ pub fn $name<'a, 'b, E, F: FnMut($typing) -> ControlFlow<E, ()>>(field: $typing,
                     for i in from..to {
                         let item = unsafe { $launder(indexable) }
                             .$get_item(i)
-                            .expect("failed to get item from index (from-to); this is a bug");
+                            .expect("failed to get item from index (from-to)");
                         inner(item, remaining_path, function)?;
                     }
                 }

@@ -1,14 +1,17 @@
 [package]
 name = "ringhopper-structs"
-version = "0.2.0"
-license = "GPL-3.0-only"
-edition = "2024"
+version.workspace = true
+license.workspace = true
+edition.workspace = true
 
 [dependencies]
-funnel-web = { git = "https://github.com/FishAndRips/funnel-web.git", rev = "538ce4533911a2e9f0dcfd8ee81c5678f3b8a8ec" }
+funnel-web = { git = "https://github.com/FishAndRips/funnel-web.git", rev = "f22d3a9bdf24368796711c9a491ff9eaaad08cd7" }
 ringhopper-structs-codegen = { path = "../ringhopper-structs-codegen" }
 byteorder = "1.5.0"
 libz-rs-sys = { version = "0.5.2", features = ["rust-allocator"], default-features = false }
+spin = "0.10.0"
+tinyvec = { version = "1.10.0", features = ["alloc"] }
+combarc = "0.1.2"
 
 [features]
 default = []

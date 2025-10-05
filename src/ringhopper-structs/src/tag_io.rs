@@ -5,6 +5,7 @@ use byteorder::ByteOrder;
 use funnel_web::id::TagID;
 use alloc::string::String;
 use core::any::type_name;
+use combarc::CombArc;
 use funnel_web::crc::CRC32;
 use crate::{Address, Parameters, Reflexive, SimpleWriteableData, Strictness, TagPath, TagReference, MAX_PATH_LEN};
 use crate::definitions::tag::tag::TagFileHeader;
@@ -22,6 +23,26 @@ pub trait WriteableData: Sized {
     fn base_length() -> usize;
 }
 
+impl<T: MainTagStruct + WriteableData + Clone> MainTagStruct for CombArc<T> {
+    fn tag_group() -> TagGroup {
+        T::tag_group()
+    }
+}
+
+impl<T: WriteableData + Clone> WriteableData for CombArc<T> {
+    fn read_tag_data<B: ByteOrder>(tag_data: &[u8], offset: usize, cursor: &mut usize, parameters: Parameters) -> Result<Self, WriteableDataError> {
+        T::read_tag_data::<B>(tag_data, offset, cursor, parameters).map(CombArc::new)
+    }
+
+    fn write_tag_data<B: ByteOrder>(&self, tag_data: &mut Vec<u8>, offset: usize, parameters: Parameters) -> Result<(), WriteableDataError> {
+        T::write_tag_data::<B>(self, tag_data, offset, parameters)
+    }
+
+    fn base_length() -> usize {
+        T::base_length()
+    }
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub enum WriteableDataError {
     OutOfBounds { offset_requested: usize, size_requested: usize, maximum_size: usize },
@@ -34,7 +55,6 @@ impl WriteableDataError {
     pub(crate) fn generic_error_static<T>(offset: usize, cursor: usize, description: &'static str) -> Self {
         Self::generic_error_moo::<T>(offset, cursor, Cow::Borrowed(description))
     }
-    #[expect(unused)]
     pub(crate) fn generic_error_alloc<T>(offset: usize, cursor: usize, description: String) -> Self {
         Self::generic_error_moo::<T>(offset, cursor, Cow::Owned(description))
     }
@@ -104,12 +124,12 @@ pub(crate) fn add_offsets(offset: usize, size: usize, buffer_size: usize) -> Res
         .ok_or(WriteableDataError::OutOfBounds { offset_requested: offset, size_requested: size, maximum_size: buffer_size })
 }
 
-impl WriteableData for TagReference {
+impl<const INTERNAL: usize> WriteableData for TagReference<INTERNAL> {
     fn read_tag_data<B: ByteOrder>(tag_data: &[u8], offset: usize, cursor: &mut usize, parameters: Parameters) -> Result<Self, WriteableDataError> {
         let tag_reference = TagReferenceC::read_tag_data::<B>(tag_data, offset, cursor, parameters)?;
         let len = tag_reference.path_size as usize;
         if len == 0 {
-            return Ok(TagReference::Unset(tag_reference.group))
+            return Ok(TagReference::new())
         }
 
         let end = add_offsets(*cursor, len, tag_data.len())?;
@@ -124,27 +144,37 @@ impl WriteableData for TagReference {
 
         *cursor = end_with_null_terminator;
 
-        TagPath::from_path_without_extension(tag_path_str, tag_reference.group)
-            .map_err(|description| WriteableDataError::generic_error_static::<Self>(offset, string_offset, description))
-            .map(TagReference::Set)
+        let group = TagGroup::read_tag_data::<B>(tag_data, offset, cursor, parameters)?;
+        let path = TagPath::from_path_without_extension(tag_path_str, group)
+            .map_err(|description| WriteableDataError::generic_error_static::<Self>(offset, string_offset, description))?;
+
+        match Self::from_path(path) {
+            Ok(n) => Ok(n),
+            Err(_) => if parameters.strictness > Strictness::LastResort {
+                Ok(Self::new())
+            }
+            else {
+                Err(WriteableDataError::generic_error_alloc::<Self>(offset, string_offset, alloc::format!("can't use a {group} group for this reference")))
+            }
+        }
     }
     fn write_tag_data<B: ByteOrder>(&self, tag_data: &mut Vec<u8>, offset: usize, parameters: Parameters) -> Result<(), WriteableDataError> {
-        match self {
-            TagReference::Unset(group) => TagReferenceC {
-                group: *group,
+        match self.get() {
+            None => TagReferenceC {
+                group: 0,
                 path_pointer: Address::default(),
                 path_size: 0,
                 tag_id: TagID::new()
             }.write_tag_data::<B>(tag_data, offset, parameters),
 
-            TagReference::Set(tag_path) => {
+            Some(tag_path) => {
                 let path = tag_path.path();
                 let path_len = path.len();
                 debug_assert!(path_len < MAX_PATH_LEN);
 
                 let path_size = path_len as u32;
                 TagReferenceC {
-                    group: tag_path.group(),
+                    group: tag_path.group() as u32,
                     path_pointer: Address::default(),
                     path_size,
                     tag_id: TagID::new()
@@ -163,7 +193,7 @@ impl WriteableData for TagReference {
     }
 }
 
-impl<T: WriteableData> WriteableData for Reflexive<T> {
+impl<T: WriteableData + Clone> WriteableData for Reflexive<T> {
     fn read_tag_data<B: ByteOrder>(tag_data: &[u8], offset: usize, cursor: &mut usize, parameters: Parameters) -> Result<Self, WriteableDataError> {
         let base = ReflexiveC::read_tag_data::<B>(tag_data, offset, cursor, parameters)?;
         if base.count == 0 {
@@ -376,6 +406,13 @@ fn parse_utf16_string(data_with_null_terminator: &[u8], parameters: Parameters) 
 
     for c in char::decode_utf16(wchar_iterator()) {
         let c = c.expect("was checked in an earlier loop to be valid UTF-16");
+        
+        if c != '\n' && c != '\r' && c.is_control() {
+            if parameters.strictness > Strictness::Relaxed {
+                return Err(WriteableDataError::Other { description: Cow::Borrowed("String contains control characters") });
+            }
+        }
+        
         string.push(c);
     }
 

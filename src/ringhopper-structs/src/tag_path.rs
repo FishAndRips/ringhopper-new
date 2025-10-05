@@ -1,6 +1,6 @@
 use alloc::string::String;
 use core::fmt::{Debug, Display, Formatter};
-use crate::definitions::tag::TagGroup;
+use crate::definitions::tag::{TagGroup, TAG_REFERENCE_GROUPS};
 use core::cmp::Ordering;
 use crate::util::*;
 
@@ -317,26 +317,77 @@ impl Display for TagPath {
 }
 
 /// Tag reference primitive.
-///
-/// This can be set or unset. If unset, it still has a tag group associated with it.
 #[derive(Clone, PartialEq, Debug)]
-pub enum TagReference {
-    Unset(TagGroup),
-    Set(TagPath)
+pub struct TagReference<const INTERNAL: usize> {
+    tag: Option<TagPath>
 }
 
-impl Default for TagReference {
+impl<const INTERNAL: usize> TagReference<INTERNAL> {
     #[inline]
-    fn default() -> Self {
-        Self::Unset(TagGroup::None)
+    pub const fn new() -> Self {
+        Self {
+            tag: None
+        }
+    }
+
+    #[inline]
+    pub fn from_path(path: TagPath) -> Result<Self, &'static str> {
+        let mut reference = Self::new();
+        reference.set(path)?;
+        Ok(reference)
+    }
+
+    #[inline]
+    pub const fn allowed_tag_groups() -> &'static [TagGroup] {
+        const { TAG_REFERENCE_GROUPS[INTERNAL] }
+    }
+
+    #[inline]
+    pub const fn get(&self) -> Option<&TagPath> {
+        self.tag.as_ref()
+    }
+
+    #[inline]
+    pub const fn is_set(&self) -> bool {
+        self.tag.is_some()
+    }
+
+    #[inline]
+    pub const fn is_unset(&self) -> bool {
+        self.tag.is_none()
+    }
+
+    #[inline]
+    pub fn set(&mut self, tag: TagPath) -> Result<(), &'static str> {
+        if Self::allowed_tag_groups().contains(&tag.group) {
+            self.tag = Some(tag);
+            Ok(())
+        }
+        else {
+            Err("tag group not allowed")
+        }
+    }
+
+    #[inline]
+    pub fn clear(&mut self) {
+        self.tag = None;
     }
 }
 
-impl Display for TagReference {
+impl<const INTERNAL: usize> Default for TagReference<INTERNAL> {
+    #[inline]
+    fn default() -> Self {
+        Self {
+            tag: None
+        }
+    }
+}
+
+impl<const INTERNAL: usize> Display for TagReference<INTERNAL> {
     fn fmt(&self, f: &mut Formatter<'_>) -> core::fmt::Result {
-        match self {
-            Self::Set(path) => Display::fmt(&path, f),
-            Self::Unset(group) => f.write_fmt(format_args!("<null>.{group}"))
+        match self.tag.as_ref() {
+            Some(path) => Display::fmt(&path, f),
+            None => f.write_str("null")
         }
     }
 }
