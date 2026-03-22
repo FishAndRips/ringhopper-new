@@ -179,6 +179,9 @@ pub enum PostprocessWarningType {
 
     /// A trigger volume that looks like a BSP trigger volume but is incorrectly named.
     InvalidBSPTriggerVolumeName,
+
+    /// Ambiguous conversation participant variants were detected for an AI conversation.
+    AmbiguousConversationParticipantVariants,
 }
 
 struct NullPostprocessTagProvider;

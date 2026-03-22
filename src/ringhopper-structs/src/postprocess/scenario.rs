@@ -4,10 +4,11 @@ use crate::definitions::tag::object::{Object, ObjectType};
 use crate::definitions::tag::scenario::{Scenario, ScenarioBSPSwitchTriggerVolume, ScenarioSpawnType, ScenarioType};
 use crate::definitions::tag::scenario_structure_bsp::ScenarioStructureBSP;
 use crate::postprocess::Action;
-use crate::{EditableCompositeTagField, EditableIndexedTagField, EditableTagField, PostprocessError, PostprocessState, PostprocessWarningType, ReflexiveIndex, TagPath};
+use crate::{EditableCompositeTagField, EditableIndexedTagField, EditableTagField, PostprocessError, PostprocessState, PostprocessWarningType, ReflexiveIndex, TagPath, TagReference};
 use alloc::borrow::ToOwned;
 use alloc::collections::BTreeMap;
 use alloc::vec::Vec;
+use std::os::macos::raw::stat;
 use funnel_web::collision_bsp::CollisionBSPFunctions;
 use funnel_web::constants::TICK_RATE;
 use funnel_web::id::Index;
@@ -30,9 +31,89 @@ pub(crate) fn postprocess_scenario(scenario: &mut Scenario, action: Action, tag_
     check_player_spawns(scenario, action, tag_path, state);
     set_bsp_indices_for_scenery(scenario, action, tag_path, state, &all_bsps);
     fixup_object_names(scenario, action)?;
+    set_conversation_variant_numbers(scenario, action, tag_path, state)?;
     set_surface_indices_for_ai(scenario, action, tag_path, state, &all_bsps)?;
     generate_bsp_trigger_volumes(scenario, action, tag_path, state, &all_bsps)?;
     postprocess_cutscene_titles(scenario, action);
+
+    // Note: We do not set invalid command list indices to None as we do not support invalid
+    // reflexive indices, but tool.exe would have done that here.
+
+    Ok(())
+}
+
+// an enum that's not an enum except when it is because it just is
+//
+// basically we use tag paths to determine who is who, and it's hardcoded to Halo characters...
+const VARIANT_NUMBERS: &[(&str, u16)] = &[
+    ("bisenti", 2),
+    ("fitzgerald", 4),
+    ("jenkins", 4),
+    ("aussie", 5),
+    ("mendoza", 6),
+    ("sarge2", 101), // put "sarge2" above "sarge" so it's matched first!
+    ("sarge", 100),
+    ("johnson", 100),
+    ("lehto", 101),
+];
+
+fn match_variant_number(reference: &TagPath) -> u16 {
+    let reference_path = reference.path();
+
+    VARIANT_NUMBERS
+        .iter()
+        .find_map(|(needle, value)| reference_path.contains(needle).then_some(*value))
+        .unwrap_or(0)
+}
+
+fn set_conversation_variant_numbers(scenario: &mut Scenario, action: Action, tag_path: &TagPath, state: &dyn PostprocessState) -> Result<(), PostprocessError> {
+    if !action.postprocess() {
+        return Ok(())
+    }
+
+    for (conversation_index, conversation) in scenario.ai_conversations.iter_mut().enumerate() {
+        for (participant_index, participant) in conversation.participants.iter_mut().enumerate() {
+            participant.variant_numbers.fill(0xFFFF);
+
+            let mut warn = false;
+
+            for line in &conversation.lines {
+                if line.participant.index() != Some(participant_index) {
+                    continue
+                }
+
+                let variants = [
+                    &line.variant_1,
+                    &line.variant_2,
+                    &line.variant_3,
+                    &line.variant_4,
+                    &line.variant_5,
+                    &line.variant_6,
+                ];
+
+                for (vi, va) in variants.iter().enumerate() {
+                    if let Some(q) = va.get() {
+                        let number = &mut participant.variant_numbers[vi];
+                        let variant = match_variant_number(q);;
+
+                        if variant != *number && *number != 0xFFFF {
+                            warn = true;
+                        }
+
+                        *number = variant;
+                    }
+                }
+            }
+
+            if warn {
+                state.warn(
+                    tag_path,
+                    format_args!("Participant index #{participant_index} of conversation #{conversation_index} ({}) has ambiguous participant variants.", conversation.name),
+                    PostprocessWarningType::AmbiguousConversationParticipantVariants
+                );
+            }
+        }
+    }
 
     Ok(())
 }
@@ -364,7 +445,7 @@ fn check_palettes(scenario: &mut Scenario, action: Action, tag_path: &TagPath, s
 
     let matches = get_objects_and_palettes!(scenario);
 
-    for (spawner, palette, object_type) in matches {
+    for (spawner, _palette, object_type) in matches {
         for (index, spawn) in spawner.iter().enumerate() {
             let spawn_struct = spawn.get_composite().expect("spawners should be a struct");
             let field_type = spawn_struct.get_field("type")
@@ -374,14 +455,12 @@ fn check_palettes(scenario: &mut Scenario, action: Action, tag_path: &TagPath, s
                 .get_index()
                 .index();
 
-            match field_type {
-                Some(n) => if palette.item_count() <= n {
-                    fail_postprocess!("{object_type} #{index} has an out-of-bounds object index!");
-                }
-                None => {
-                    state.warn(tag_path, format_args!("{object_type} #{index} has no type set."), PostprocessWarningType::UnusedData);
-                }
-            }
+            let Some(_field_type) = field_type else {
+                state.warn(tag_path, format_args!("{object_type} #{index} has no type set."), PostprocessWarningType::UnusedData);
+                continue;
+            };
+
+            debug_assert!(_field_type < _palette.item_count(), "Field type wasn't checked!");
         }
     }
 
@@ -461,7 +540,7 @@ fn generate_bsp_spawn_index_bitfield(point: Vector3D, rotation: Euler3D, boundin
     spawning_bsps
 }
 
-fn compile_scripts(scenario: &mut Scenario, action: Action, _tag_path: &TagPath, _state: &dyn PostprocessState) -> Result<(), PostprocessError> {
+fn compile_scripts(scenario: &mut Scenario, action: Action, _tag_path: &TagPath, state: &dyn PostprocessState) -> Result<(), PostprocessError> {
     if !action.postprocess() {
         return Ok(())
     }
@@ -469,6 +548,20 @@ fn compile_scripts(scenario: &mut Scenario, action: Action, _tag_path: &TagPath,
     if (!scenario.scripts.is_empty() || !scenario.script_globals.is_empty() || !scenario.references.is_empty()) && scenario.source_files.is_empty() {
         fail_postprocess!("No source files are present, but script data is defined. You need to recompile the scripts.")
     }
+
+    do_compile_scripts(scenario)?;
+
+    for i in &scenario.references {
+        if state.try_read_tag(i.reference.get().expect("null reference?!")).is_none() {
+            fail_postprocess!("Scenario script references mismatch currently compiled scripts. You need to recompile the scripts.");
+        }
+    }
+
+    Ok(())
+}
+
+fn do_compile_scripts(scenario: &mut Scenario) -> Result<(), PostprocessError> {
+    scenario.scripts.clear();
 
     todo!("compile_scripts")
 }
