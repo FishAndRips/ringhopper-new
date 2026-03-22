@@ -28,7 +28,7 @@ pub(crate) fn postprocess_scenario(scenario: &mut Scenario, action: Action, tag_
 
     check_palettes(scenario, action, tag_path, state)?;
     compile_scripts(scenario, action, tag_path, state)?;
-    check_player_spawns(scenario, action, tag_path, state);
+    check_player_spawns(scenario, action, tag_path, state, &all_bsps);
     set_bsp_indices_for_scenery(scenario, action, tag_path, state, &all_bsps);
     fixup_object_names(scenario, action)?;
     set_conversation_variant_numbers(scenario, action, tag_path, state)?;
@@ -476,6 +476,9 @@ fn get_all_bsps_for_postprocessing<'a>(scenario: &mut Scenario, action: Action, 
     if scenario.structure_bsps.len() > 16 {
         fail_postprocess!("Too many BSPs in the scenario tag");
     }
+    if scenario.structure_bsps.is_empty() {
+        fail_postprocess!("No BSPs in the scenario tag");
+    }
 
     let mut bsps = Vec::new();
     bsps.reserve(scenario.structure_bsps.len());
@@ -567,11 +570,18 @@ fn do_compile_scripts(scenario: &mut Scenario) -> Result<(), PostprocessError> {
 }
 
 
-fn check_player_spawns(scenario: &mut Scenario, action: Action, tag_path: &TagPath, state: &dyn PostprocessState) {
-    // TODO: Check if spawns are inside the BSP
-
+fn check_player_spawns(scenario: &mut Scenario, action: Action, tag_path: &TagPath, state: &dyn PostprocessState, all_bsps: &[(usize, &ScenarioStructureBSP, &ModelCollisionGeometryBSP)]) {
     if !action.postprocess() {
         return
+    }
+
+    let first_bsp = all_bsps.first().expect("no bsp").2;
+    for (index, location) in scenario.player_starting_locations.iter().enumerate() {
+        // there is a bsp_index in the player starting location, but it doesn't appear to be used...?
+        // so we're just using the first BSP
+        if !first_bsp.point_inside_bsp(&location.position).expect("point_inside_bsp") {
+            state.warn(tag_path, format_args!("Player starting location #{index} is outside of BSP#0."), PostprocessWarningType::MisplacedObjects);
+        }
     }
 
     match scenario._type {
