@@ -4,11 +4,10 @@ use crate::definitions::tag::object::{Object, ObjectType};
 use crate::definitions::tag::scenario::{Scenario, ScenarioBSPSwitchTriggerVolume, ScenarioSpawnType, ScenarioType};
 use crate::definitions::tag::scenario_structure_bsp::ScenarioStructureBSP;
 use crate::postprocess::Action;
-use crate::{EditableCompositeTagField, EditableIndexedTagField, EditableTagField, PostprocessError, PostprocessState, PostprocessWarningType, ReflexiveIndex, TagPath, TagReference};
+use crate::{EditableCompositeTagField, EditableIndexedTagField, EditableTagField, PostprocessError, PostprocessState, PostprocessWarningType, ReflexiveIndex, TagPath};
 use alloc::borrow::ToOwned;
 use alloc::collections::BTreeMap;
 use alloc::vec::Vec;
-use std::os::macos::raw::stat;
 use funnel_web::collision_bsp::CollisionBSPFunctions;
 use funnel_web::constants::TICK_RATE;
 use funnel_web::id::Index;
@@ -22,7 +21,7 @@ pub(crate) fn postprocess_scenario(scenario: &mut Scenario, action: Action, tag_
     }
 
     check_duplicate_object_names(scenario)?;
-    merge_scenarios(scenario, action, tag_path, state)?;
+    merge_scenarios(scenario, action, state)?;
 
     let all_bsps = get_all_bsps_for_postprocessing(scenario, action, state)?;
 
@@ -94,7 +93,7 @@ fn set_conversation_variant_numbers(scenario: &mut Scenario, action: Action, tag
                 for (vi, va) in variants.iter().enumerate() {
                     if let Some(q) = va.get() {
                         let number = &mut participant.variant_numbers[vi];
-                        let variant = match_variant_number(q);;
+                        let variant = match_variant_number(q);
 
                         if variant != *number && *number != 0xFFFF {
                             warn = true;
@@ -287,7 +286,7 @@ fn fixup_object_names(scenario: &mut Scenario, action: Action) -> Result<(), Pos
     Ok(())
 }
 
-fn merge_scenarios(scenario: &mut Scenario, action: Action, tag_path: &TagPath, state: &mut dyn PostprocessState) -> Result<(), PostprocessError> {
+fn merge_scenarios(scenario: &mut Scenario, action: Action, state: &mut dyn PostprocessState) -> Result<(), PostprocessError> {
     if !action.postprocess() {
         return Ok(())
     }
@@ -301,15 +300,13 @@ fn merge_scenarios(scenario: &mut Scenario, action: Action, tag_path: &TagPath, 
             .expect("child scenario")
             .to_owned();
 
-        for bsp in &child_scenario.structure_bsps {
-            let bsp = &bsp.structure_bsp;
-            let found = scenario.structure_bsps.iter().any(|i| &i.structure_bsp == bsp);
-            if !found {
-                state.warn(
-                    tag_path,
-                    format_args!("Child scenario {child_scenario_path} contains BSP {bsp} which is not present in the main scenario. BSPs do not get merged."),
-                    PostprocessWarningType::MismatchedChildScenarioBSP
-                );
+        if child_scenario.structure_bsps.len() > scenario.structure_bsps.len() {
+            fail_postprocess!("Child scenario {child_scenario_path} has more BSPs than the main scenario which is invalid (BSPs do not get merged!).")
+        }
+
+        for (index, (main_bsp, child_bsp)) in scenario.structure_bsps.iter().zip(child_scenario.structure_bsps.iter()).enumerate() {
+            if main_bsp.structure_bsp != child_bsp.structure_bsp {
+                fail_postprocess!("Child scenario {child_scenario_path} BSP #{index} is mismatched which is invalid (BSPs do not get merged!).")
             }
         }
 
@@ -531,8 +528,11 @@ fn set_bsp_indices_for_scenery(scenario: &mut Scenario, action: Action, tag_path
 }
 
 fn generate_bsp_spawn_index_bitfield(point: Vector3D, rotation: Euler3D, bounding_offset: Vector3D, bsps: &[(usize, &ScenarioStructureBSP, &ModelCollisionGeometryBSP)]) -> u16 {
-    let mut transformation = Matrix4x3::from(rotation);
-    transformation.position = point;
+    let transformation = Matrix4x3 {
+        position: point,
+        ..Matrix4x3::from(rotation)
+    };
+
     let point_to_check = transformation.transform_point(bounding_offset);
 
     let mut spawning_bsps = 0;
