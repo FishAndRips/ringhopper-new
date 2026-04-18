@@ -327,7 +327,7 @@ fn sort_decals(bsp: &ScenarioStructureBSP, reflexive: &Reflexive<ScenarioDecal>)
 
     for i in reflexive {
         let offset = apply_decal_offset(i);
-        let cluster_index = collision_bsp.leaf_index_for_point(&offset)
+        let cluster_index = collision_bsp.leaf_index_for_point_3d(offset)
             .ok()
             .flatten()
             .and_then(|i| bsp.leaves.get(i))
@@ -342,7 +342,6 @@ fn sort_decals(bsp: &ScenarioStructureBSP, reflexive: &Reflexive<ScenarioDecal>)
             }
         });
     }
-
 
     // note: the original implementation uses qsort (introsort on MSVC) and just compares cluster
     // indices; this may result in a different order from Rust's driftsort when cluster indices are

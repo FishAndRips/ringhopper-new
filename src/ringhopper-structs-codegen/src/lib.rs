@@ -387,35 +387,10 @@ fn generate_bitfield(q: &mut String, b: &Bitfield) {
 
     let width = b.width;
 
-    write(q, format_args!("impl SimpleWriteableData for {name} {{\n")).unwrap();
-    *q += "#[inline]\n";
-    write(q, format_args!("fn length() -> usize {{ {width} / 8 }}\n")).unwrap();
+    write(q, format_args!("impl {name} {{\n")).unwrap();
 
-    *q += "fn read_tag_data_simple<B: ByteOrder>(from: &[u8], parameters: Parameters) -> Result<Self, &'static str> {\n";
-    write(q, format_args!("let raw_data = u{width}::read_tag_data_simple::<B>(from, parameters)?;\n")).unwrap();
-    *q += "Ok(Self {\n";
-
-    for field in &b.fields {
-        if field.flags.exclude {
-            continue
-        }
-        write(q, format_args!("{}: \n", field.name_rust_field)).unwrap();
-        if field.flags.cache_only {
-            *q += "parameters.cache_only_fields && "
-        }
-        else if field.flags.non_cached {
-            *q += "parameters.tag_only_fields && "
-        }
-        write(q, format_args!("(raw_data & {}) != 0", field.value)).unwrap();
-        *q += ",\n";
-    }
-
-    *q += "})\n";
-    *q += "}\n";
-
-    *q += "fn write_tag_data_simple<B: ByteOrder>(&self, to: &mut [u8], parameters: Parameters) {\n";
+    write(q, format_args!("pub const fn as_int(self, parameters: Parameters) -> u{width} {{")).unwrap();
     write(q, format_args!("let mut raw_data = 0u{width};\n")).unwrap();
-
     for field in &b.fields {
         if field.flags.exclude {
             continue
@@ -429,9 +404,47 @@ fn generate_bitfield(q: &mut String, b: &Bitfield) {
         }
         write(q, format_args!("self.{} {{ raw_data |= {} }}\n", field.name_rust_field, field.value)).unwrap();
     }
+    *q += "raw_data\n";
+    *q += "}\n";
 
+    write(q, format_args!("pub const fn from_int(v: u{width}, parameters: Parameters) -> Self {{")).unwrap();
+    *q += "Self {\n";
+
+    for field in &b.fields {
+        if field.flags.exclude {
+            continue
+        }
+        write(q, format_args!("{}: \n", field.name_rust_field)).unwrap();
+        if field.flags.cache_only {
+            *q += "parameters.cache_only_fields && "
+        }
+        else if field.flags.non_cached {
+            *q += "parameters.tag_only_fields && "
+        }
+        write(q, format_args!("(v & {}) != 0", field.value)).unwrap();
+        *q += ",\n";
+    }
+
+    *q += "}\n";
+    *q += "}\n";
+
+    *q += "}\n";
+
+
+    write(q, format_args!("impl SimpleWriteableData for {name} {{\n")).unwrap();
+    *q += "#[inline]\n";
+    write(q, format_args!("fn length() -> usize {{ {width} / 8 }}\n")).unwrap();
+
+    *q += "fn read_tag_data_simple<B: ByteOrder>(from: &[u8], parameters: Parameters) -> Result<Self, &'static str> {\n";
+    write(q, format_args!("let raw_data = u{width}::read_tag_data_simple::<B>(from, parameters)?;\n")).unwrap();
+    *q += "Ok(Self::from_int(raw_data, parameters))\n";
+    *q += "}\n";
+
+    *q += "fn write_tag_data_simple<B: ByteOrder>(&self, to: &mut [u8], parameters: Parameters) {\n";
+    write(q, format_args!("let raw_data = self.as_int(parameters);\n")).unwrap();
     *q += "raw_data.write_tag_data_simple::<B>(to, parameters)\n";
     *q += "}\n";
+
     *q += "}\n";
     write(q, format_args!("impl EditableTagField for {name} {{")).unwrap();
     *q += "#[inline] fn get_field_type_name(&self) -> &'static str { \"";

@@ -1,3 +1,5 @@
+mod ai;
+
 use crate::constants::DEFAULT_MAX_NUMBER_PLAYERS;
 use crate::definitions::tag::model_collision_geometry::ModelCollisionGeometryBSP;
 use crate::definitions::tag::object::{Object, ObjectType};
@@ -13,6 +15,8 @@ use funnel_web::constants::TICK_RATE;
 use funnel_web::id::Index;
 use funnel_web::nudge::fix_decimal_rounding;
 use funnel_web::vector::{Euler3D, Matrix4x3, Vector3D};
+
+const MAX_BSPS: usize = 16;
 
 pub(crate) fn postprocess_scenario(scenario: &mut Scenario, action: Action, tag_path: &TagPath, state: &mut dyn PostprocessState) -> Result<(), PostprocessError> {
     // Do not postprocess anything that's not the main scenario tag
@@ -31,7 +35,8 @@ pub(crate) fn postprocess_scenario(scenario: &mut Scenario, action: Action, tag_
     set_bsp_indices_for_scenery(scenario, action, tag_path, state, &all_bsps);
     fixup_object_names(scenario, action)?;
     set_conversation_variant_numbers(scenario, action, tag_path, state)?;
-    set_surface_indices_for_ai(scenario, action, tag_path, state, &all_bsps)?;
+    ai::postprocess_command_list(scenario, action, tag_path, state, &all_bsps)?;
+    ai::postprocess_encounters(scenario, action, tag_path, state, &all_bsps)?;
     generate_bsp_trigger_volumes(scenario, action, tag_path, state, &all_bsps)?;
     postprocess_cutscene_titles(scenario, action);
 
@@ -159,14 +164,6 @@ macro_rules! get_objects_and_palettes {
             (&$scenario.sound_scenery as &dyn EditableIndexedTagField, &$scenario.sound_scenery_palette as &dyn EditableIndexedTagField, ObjectType::SoundScenery),
         ]
     };
-}
-
-fn set_surface_indices_for_ai(scenario: &mut Scenario, action: Action, tag_path: &TagPath, state: &dyn PostprocessState, all_bsps: &[(usize, &ScenarioStructureBSP, &ModelCollisionGeometryBSP)]) -> Result<(), PostprocessError> {
-    if !action.postprocess() {
-        return Ok(())
-    }
-
-    todo!()
 }
 
 fn generate_bsp_trigger_volumes(scenario: &mut Scenario, action: Action, tag_path: &TagPath, state: &dyn PostprocessState, all_bsps: &[(usize, &ScenarioStructureBSP, &ModelCollisionGeometryBSP)]) -> Result<(), PostprocessError> {
@@ -470,7 +467,7 @@ fn get_all_bsps_for_postprocessing<'a>(scenario: &mut Scenario, action: Action, 
     }
 
     // TODO: make sure this count gets checked
-    if scenario.structure_bsps.len() > 16 {
+    if scenario.structure_bsps.len() > MAX_BSPS {
         fail_postprocess!("Too many BSPs in the scenario tag");
     }
     if scenario.structure_bsps.is_empty() {
@@ -537,7 +534,7 @@ fn generate_bsp_spawn_index_bitfield(point: Vector3D, rotation: Euler3D, boundin
 
     let mut spawning_bsps = 0;
     for (index, _bsp, collision) in bsps.iter().copied() {
-        let inside_bsp = (collision.point_inside_bsp(&point_to_check).expect("checked bsp") as u16) << index;
+        let inside_bsp = (collision.point_inside_bsp(point_to_check).expect("checked bsp") as u16) << index;
         spawning_bsps |= inside_bsp;
     }
     spawning_bsps
@@ -579,7 +576,7 @@ fn check_player_spawns(scenario: &mut Scenario, action: Action, tag_path: &TagPa
     for (index, location) in scenario.player_starting_locations.iter().enumerate() {
         // there is a bsp_index in the player starting location, but it doesn't appear to be used...?
         // so we're just using the first BSP
-        if !first_bsp.point_inside_bsp(&location.position).expect("point_inside_bsp") {
+        if !first_bsp.point_inside_bsp(location.position).expect("point_inside_bsp") {
             state.warn(tag_path, format_args!("Player starting location #{index} is outside of BSP#0."), PostprocessWarningType::MisplacedObjects);
         }
     }

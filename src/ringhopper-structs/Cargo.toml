@@ -5,12 +5,12 @@ license.workspace = true
 edition.workspace = true
 
 [dependencies]
-funnel-web = { git = "https://github.com/FishAndRips/funnel-web.git", rev = "f22d3a9bdf24368796711c9a491ff9eaaad08cd7" }
+funnel-web = { git = "https://github.com/FishAndRips/funnel-web.git", rev = "425395d7541a09011371e23f59d38673c0a82b17" }
 ringhopper-structs-codegen = { path = "../ringhopper-structs-codegen" }
 byteorder = "1.5.0"
 libz-rs-sys = { version = "0.5.2", features = ["rust-allocator"], default-features = false }
 spin = "0.10.0"
-tinyvec = { version = "1.10.0", features = ["alloc"] }
+tinyvec = { version = "1.11.0", features = ["alloc"] }
 combarc = "0.1.2"
 
 [features]

@@ -1,4 +1,4 @@
-use funnel_web::collision_bsp::{BSP2DNodeReference, CollisionBSP2DNode, CollisionBSP2DNodeIndex, CollisionBSP3DNode, CollisionBSP3DNodeIndex, CollisionBSPFunctions, CollisionBSPLeaf, CollisionBSPSurface};
+use funnel_web::collision_bsp::{BSP2DNodeReference, CollisionBSP2DNode, CollisionBSP2DNodeIndex, CollisionBSP3DNode, CollisionBSP3DNodeIndex, CollisionBSPEdge, CollisionBSPFunctions, CollisionBSPLeaf, CollisionBSPSurface, CollisionBSPSurfaceFlags, CollisionBSPVertex};
 use funnel_web::vector::Plane3D;
 use crate::definitions::tag::model_collision_geometry::ModelCollisionGeometryBSP;
 
@@ -61,11 +61,45 @@ impl CollisionBSPFunctions for ModelCollisionGeometryBSP {
     fn get_surface(&self, surface: usize) -> Option<CollisionBSPSurface> {
         self.surfaces.get(surface).map(|i| CollisionBSPSurface {
             plane: i.plane as usize,
-            material: i.material.0
+            first_edge: 0,
+            flags: CollisionBSPSurfaceFlags {
+                two_sided: i.flags.two_sided,
+                invisible: i.flags.invisible,
+                climbable: i.flags.climbable,
+                breakable: i.flags.breakable,
+            },
+            material: i.material.0,
+            breakable_surface_index: None,
         })
     }
 
     fn get_surface_count(&self) -> usize {
         self.surfaces.len()
+    }
+
+    fn get_edge(&self, edge: usize) -> Option<CollisionBSPEdge> {
+        self.edges.get(edge).map(|v| CollisionBSPEdge {
+            start_vertex: v.start_vertex as usize,
+            end_vertex: v.end_vertex as usize,
+            forward_edge: v.forward_edge as usize,
+            reverse_edge: v.reverse_edge as usize,
+            left_surface: v.left_surface as usize,
+            right_surface: v.right_surface as usize,
+        })
+    }
+
+    fn get_edge_count(&self) -> usize {
+        self.edges.len()
+    }
+
+    fn get_vertex(&self, vertex: usize) -> Option<CollisionBSPVertex> {
+        self.vertices.get(vertex).map(|v| CollisionBSPVertex {
+            point: v.point,
+            first_edge: v.first_edge as usize,
+        })
+    }
+
+    fn get_vertex_count(&self) -> usize {
+        self.vertices.len()
     }
 }

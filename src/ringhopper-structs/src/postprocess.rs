@@ -69,6 +69,7 @@ use crate::{EditableTag, ModelFns, Parameters, SimpleWriteableData, TagPath};
 use alloc::borrow::Cow;
 use core::fmt::{Arguments, Display, Formatter};
 use alloc::boxed::Box;
+use funnel_web::collision_bsp::CollisionBSPError;
 use funnel_web::constants::{reverse_seconds_to_ticks, seconds_to_ticks};
 use crate::definitions::engine::Engine;
 use crate::definitions::tag::globals::Globals;
@@ -81,6 +82,14 @@ pub enum PostprocessError {
     },
     InvalidTagDataError {
         explanation: Cow<'static, str>
+    }
+}
+
+impl From<CollisionBSPError> for PostprocessError {
+    fn from(value: CollisionBSPError) -> Self {
+        Self::InvalidTagDataError {
+            explanation: Cow::Owned(alloc::format!("BSP traversal error: {value}"))
+        }
     }
 }
 
@@ -182,6 +191,9 @@ pub enum PostprocessWarningType {
 
     /// Ambiguous conversation participant variants were detected for an AI conversation.
     AmbiguousConversationParticipantVariants,
+
+    /// Command lists not found inside any BSP.
+    MisplacedCommandLists,
 }
 
 struct NullPostprocessTagProvider;
